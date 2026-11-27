@@ -1466,15 +1466,18 @@ export class Runner {
   // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
   // The agent's reserve, when it can take the reply: its model, and the account it runs on (unset: its harness's
   // usual login). None when it's the very login and model that just ran out, or when its login isn't ready.
-  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
-    const model = agent.fallbackModelId ? modelInfo(agent.fallbackModelId) : undefined
+  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { id: string; model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
+    // Its own reserve, else the workspace's (Settings › Models), which takes no account of its own.
+    const own = !!agent.fallbackModelId
+    const id = agent.fallbackModelId || settings.defaultFallbackModel
+    const model = id ? modelInfo(id) : undefined
     if (!model?.id) return undefined
     // An account of another harness (the reserve's model changed since) means the usual login, like the agent's own.
-    const account = agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
-    if (agent.fallbackModelId === agent.modelId && account?.id === from?.id) return undefined
+    const account = own && agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
+    if (id === agent.modelId && account?.id === from?.id) return undefined
     const status = settings.engines[model.engine]
     if (!status?.installed || (account ? !account.loggedIn : !status.loggedIn)) return undefined
-    return { model, account }
+    return { id: id!, model, account }
   }
 
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
@@ -3488,7 +3491,7 @@ ${note}`,
         plan = undefined
         input = whole
         onReserve = true
-        modelId = agent.fallbackModelId!
+        modelId = reserve.id
         modelName = reserve.model.id
         engineId = reserve.model.engine
         replyTrace?.movedTo(engineId, modelName)
@@ -4858,9 +4861,10 @@ ${note}`,
 }
 
 // Models that may pick who answers in a channel when the router's own can't: the reserve
-// models of the channel's agents, then their main ones, on another harness that's signed in.
-export function routerReserves(members: Agent[], settings: Pick<Settings, 'engines'>, out: EngineId): NonNullable<ReturnType<typeof modelInfo>>[] {
-  const ids = [...members.map((a) => a.fallbackModelId), ...members.map((a) => a.modelId)].filter((id): id is string => !!id)
+// models of the channel's agents (the workspace's default reserve for one without its own), then
+// their main ones, on another harness that's signed in.
+export function routerReserves(members: Agent[], settings: Pick<Settings, 'engines' | 'defaultFallbackModel'>, out: EngineId): NonNullable<ReturnType<typeof modelInfo>>[] {
+  const ids = [...members.map((a) => a.fallbackModelId || settings.defaultFallbackModel), ...members.map((a) => a.modelId)].filter((id): id is string => !!id)
   const seen = new Set<string>()
   const list: NonNullable<ReturnType<typeof modelInfo>>[] = []
   for (const id of ids) {

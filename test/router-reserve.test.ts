@@ -16,6 +16,11 @@ describe("the models that pick when the router's can't", () => {
     expect(routerReserves(members, { engines }, 'claude').map((m) => m.engine)).toEqual(['grok'])
   })
 
+  it("the workspace's default reserve for an agent without its own", () => {
+    expect(routerReserves([agent('a')], { engines, defaultFallbackModel: 'grok:grok-4.7' }, 'claude').map((m) => m.engine)).toEqual(['grok'])
+    expect(routerReserves([agent('a', { fallbackModelId: 'gpt-5.6-luna' })], { engines: { ...engines, codex: ready }, defaultFallbackModel: 'grok:grok-4.7' }, 'claude').map((m) => m.engine)).toEqual(['codex'])
+  })
+
   it("then the agents' main models; nothing on a harness that's signed out", () => {
     expect(routerReserves([agent('a')], { engines }, 'codex').map((m) => m.id)).toEqual(['sonnet'])
     expect(routerReserves([agent('a', { fallbackModelId: 'grok:grok-4.7' })], { engines: { ...engines, grok: out } }, 'claude')).toEqual([])

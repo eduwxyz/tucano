@@ -10,9 +10,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Corrigido:** um agente que **errava o nome de um parâmetro** de uma ferramenta (comum no Grok) recebia só "Faltou o que buscar" e tentava de novo até parar com "8 ferramentas falharam seguidas". Agora a resposta diz o que faltou e lista os parâmetros da ferramenta, e ele acerta na próxima.
 > - **Corrigido:** com o modelo do **roteador** sem limite (o Haiku, quando o Claude acaba), um **canal** ficava sem resposta, enquanto a DM com o mesmo agente seguia no modelo reserva. Agora o reserva dos agentes do canal escolhe quem responde, e a mensagem diz isso.
 > - **Corrigido:** o **modelo de voz** do ditado é baixado uma vez só pra todos os workspaces. Antes, cada workspace novo baixava de novo os 574 MB.
+> - **Novo:** um **modelo reserva padrão** em Configurações › Modelos, pra todos os agentes que não têm um próprio (o da página do agente vence). E o **Tuca** agora configura o reserva de um agente pelo card de ajuste: antes ele não conseguia.
 
 ### Added
 
+- **A reserve model for the whole team.** Setting a reserve meant opening each agent's page, one by one, and asking the Tuca to do it for all of them failed: `propor_ajuste` had no field for it, so he tried until he stopped. **Settings › Models** now has a **Reserve model** card: a default for every agent without one of its own (the one on the agent's page still wins). `propor_ajuste` takes `modelo_reserva` (or "nenhum" to remove it), the card shows it as a before and after row, and the state the Tuca reads shows each agent's reserve and the default.
 - **Dictate the answer to a decision.** The decisions card had no microphone, so an agent's question in words could only be answered by typing, or by dictating in the message field, which answered the whole card at once. The microphone now sits in the corner of the field the answer is written in: a text decision's, or **Something else** once open. It works as in the message field (click, or ⌥Space on a Mac and Ctrl+Space elsewhere; Esc cancels), puts the words at the cursor, and sends nothing until you confirm; while it records, the time and how to finish show in the card's footer, in place of the keys.
 
 ### Fixed

@@ -58,11 +58,11 @@ export const routineStamp = (r: Routine): string => stable({ name: r.name, agent
 
 // The fields an applied change set that the agent no longer has: someone changed them since.
 export function changedSince(agent: Agent, changes: AgentChanges): (keyof AgentChanges)[] {
-  const norm = (k: string, v: unknown): unknown => (k === 'web' ? v !== false : v)
+  const norm = (k: string, v: unknown): unknown => (k === 'web' ? v !== false : k === 'fallbackModelId' ? (v || '') : v)
   return (Object.keys(changes) as (keyof AgentChanges)[]).filter((k) => stable(norm(k, agent[k])) !== stable(norm(k, changes[k])))
 }
 
-const FIELDS = (): Record<string, string> => ({ name: L('o nome', 'the name'), role: L('a função', 'the role'), instructions: L('as instruções', 'the instructions'), modelId: L('o modelo', 'the model'), effort: L('o esforço', 'the effort'), web: L('a web', 'the web'), grants: L('os conectores', 'the connectors'), limit: L('o limite', 'the limit') })
+const FIELDS = (): Record<string, string> => ({ name: L('o nome', 'the name'), role: L('a função', 'the role'), instructions: L('as instruções', 'the instructions'), modelId: L('o modelo', 'the model'), effort: L('o esforço', 'the effort'), web: L('a web', 'the web'), grants: L('os conectores', 'the connectors'), limit: L('o limite', 'the limit'), fallbackModelId: L('o modelo reserva', 'the reserve model') })
 const list = (xs: string[]): string => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} ${L('e', 'and')} ${xs.at(-1)}`)
 
 // Why it can't be taken back, said so instead of undoing blindly, with what to do instead.
