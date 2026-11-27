@@ -4,6 +4,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.53] - 2026-11-27
+
+> **Em português:**
+> - **Mudou:** a **imagem Docker** vem com o **OpenCode 2**. Com o 1.x, um modelo que o OpenCode não alcança (um modelo da OpenCode Go sem o login do Go, por exemplo) só mostrava "Unexpected server error"; agora o motivo aparece em Configurações › Modelos. Os logins feitos no 1.x continuam valendo.
+> - **Corrigido:** em **Configurações**, as abas (Você, Agentes, Modelos…) não respondiam ao clique depois de rolar a página no Mac, só de volta ao topo. Agora funcionam em qualquer ponto da página.
+
 ### Changed
 
 - **The Docker image runs OpenCode 2.** npm's `opencode-ai` is still the 1.x line, so the image installed OpenCode 1.19, which answers a model it can't reach (an OpenCode Go model without the Go login, say) with "Unexpected server error. Check server logs for details." The image now takes OpenCode 2.3.2 from its GitHub release, checked against its SHA-256, and Tucano already runs 2.x its own way. The reason now reaches Settings › Models, as in "This OpenCode Go model is hosted outside Europe and the United States". Logins made with 1.x carry over: 2.x reads the old `auth.json` in the volume on its first start.
