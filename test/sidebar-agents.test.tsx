@@ -6,7 +6,7 @@ import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Agent, Conversation, Message, Person, RunStatus } from '../src/shared/types'
+import type { Agent, Conversation, Inbox, Message, Person, RunStatus } from '../src/shared/types'
 import type { State } from '../src/renderer/src/store'
 
 const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
@@ -28,6 +28,8 @@ const bia: Person = { id: 'bia', name: 'Bia', role: 'member', about: '' }
 const agent = (p: Partial<Agent>): Agent => ({ id: 'a1', name: 'Lia', handle: 'lia', role: 'Pesquisadora', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...p })
 const dm = (p: Partial<Conversation>): Conversation => ({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'], ...p })
 const msg = (id: string, conversationId: string, agentId: string, status: RunStatus): Message => ({ id, conversationId, author: { kind: 'agent', id: agentId }, text: '', at: 0, run: { status, steps: [] } })
+// A reply with a next-steps card, but no ask or approval: it does not need the person's eye.
+const steps = (id: string, conversationId: string, agentId: string): Message => ({ ...msg(id, conversationId, agentId, 'done'), run: { status: 'done', steps: [], stepsOpen: true } })
 
 let root: Root
 const render = async (s: Partial<State>): Promise<void> => {
@@ -38,6 +40,9 @@ const render = async (s: Partial<State>): Promise<void> => {
 const section = (label: string): Element => [...document.querySelectorAll('.section')].find((x) => x.querySelector('.section__head')?.textContent?.includes(label))!
 const agentRows = (): Element[] => [...section('Agentes').querySelectorAll('.agent-row > .nav-item')]
 const row = (name: string): Element => agentRows().find((r) => r.querySelector('.nav-item__label')?.textContent === name)!
+const channelRow = (name: string): Element => [...section('Canais').querySelectorAll('.channel-row > .nav-item')].find((r) => r.querySelector('.nav-item__label')?.textContent === name)!
+// The fold CSS keeps a row when it is active or marked as waiting on the person (a question or an approval).
+const shown = (nav: Element): boolean => ['is-active', 'is-attention'].some((c) => nav.classList.contains(c))
 const click = (el: Element): Promise<void> => act(async () => void el.dispatchEvent(new window.Event('click', { bubbles: true })))
 
 beforeEach(() => (root = createRoot(document.getElementById('root')!)))
@@ -230,5 +235,119 @@ describe('the sidebar in the order the person left it', () => {
     await render({ agents: [agent({})], conversations: [], settings: { navOrder: ['operations', 'board', 'approvals'], sidebarHidden: ['approvals'] } as State['settings'] })
     const top = [...document.querySelectorAll('.top-row')].map((r) => r.getAttribute('data-order-id'))
     expect(top).toEqual([null, 'operations', 'board', 'knowledge']) // the Tuca stays first, unsortable; Aprovações stays out
+  })
+})
+
+describe('rows that stay in a folded sidebar', () => {
+  const ch = (id: string, name: string, unread = 0): Conversation => ({ id, kind: 'channel', name, members: ['a1'], unread })
+  const inGroup = (channels: string[]): State['settings'] => ({ channelLayout: { loose: [], groups: [{ id: 'g1', name: 'Projetos', channels }] } }) as unknown as State['settings']
+  const folder = (): Element => [...document.querySelectorAll('.channel-group.is-folded')].find((g) => g.querySelector('.fold-toggle span')?.textContent === 'Projetos')!
+  const sector = (): Element => [...document.querySelectorAll('.agent-sector.is-folded')].find((g) => g.querySelector('.fold-toggle span')?.textContent === 'Pesquisa')!
+
+  it('keeps a channel with a question in a folded group, but not a working or a quiet one', async () => {
+    await render({
+      conversations: [ch('c1', 'geral'), ch('c2', 'aleatorio'), ch('c3', 'pedidos')],
+      messages: { c1: [msg('m1', 'c1', 'a1', 'working')], c3: [msg('m3', 'c3', 'a1', 'waiting_input')] },
+      settings: { ...inGroup(['c1', 'c2', 'c3']), folded: ['group:g1'] } as State['settings']
+    })
+    expect(folder()).toBeDefined()
+    expect(channelRow('pedidos').className).toContain('is-attention')
+    expect(shown(channelRow('pedidos'))).toBe(true)
+    // Work going on doesn't wait on the person: the fold keeps it out of sight.
+    expect(channelRow('geral').className).not.toContain('is-attention')
+    expect(shown(channelRow('geral'))).toBe(false)
+    expect(shown(channelRow('aleatorio'))).toBe(false)
+  })
+
+  it('keeps a DM with a question in a folded section, but not a reply with only next steps', async () => {
+    await render({
+      agents: [agent({}), agent({ id: 'a2', name: 'Theo', handle: 'theo' })],
+      conversations: [dm({}), dm({ id: 'd2', name: 'a2', members: ['a2'] })],
+      messages: { d1: [msg('m1', 'd1', 'a1', 'waiting_input')], d2: [steps('m2', 'd2', 'a2')] },
+      settings: { folded: ['section:agents'] } as State['settings']
+    })
+    expect(section('Agentes').className).toContain('is-folded')
+    expect(row('Lia').className).toContain('is-attention')
+    expect(shown(row('Lia'))).toBe(true)
+    expect(row('Theo').className).not.toContain('is-attention')
+    expect(shown(row('Theo'))).toBe(false)
+  })
+
+  it('keeps a DM with an approval in a folded agent sector, but not a quiet one', async () => {
+    const team = [agent({ sectorName: 'Pesquisa' }), agent({ id: 'a2', name: 'Theo', handle: 'theo', reportsTo: 'a1' })]
+    await render({
+      agents: team,
+      conversations: [dm({}), dm({ id: 'd2', name: 'a2', members: ['a2'] })],
+      messages: { d2: [msg('m1', 'd2', 'a2', 'waiting_approval')] },
+      settings: { folded: ['sector:a1'] } as State['settings']
+    })
+    expect(sector()).toBeDefined()
+    expect(row('Theo').className).toContain('is-attention')
+    expect(shown(row('Theo'))).toBe(true)
+    expect(shown(row('Lia'))).toBe(false)
+  })
+
+  it('folds away a channel and a DM with unread only: the header badge counts them', async () => {
+    await render({
+      agents: [agent({})],
+      conversations: [ch('c1', 'geral', 2), dm({ unread: 3 })],
+      settings: { ...inGroup(['c1']), folded: ['section:channels', 'group:g1', 'section:agents'] } as State['settings']
+    })
+    expect(section('Canais').className).toContain('is-folded')
+    expect(section('Agentes').className).toContain('is-folded')
+    expect(folder()).toBeDefined()
+    expect(channelRow('geral').className).toContain('is-unread')
+    expect(shown(channelRow('geral'))).toBe(false)
+    expect(row('Lia').className).toContain('is-unread')
+    expect(shown(row('Lia'))).toBe(false)
+  })
+
+  it('a thread reply that raises the unread count does not bring the row back', async () => {
+    const conversation = ch('c1', 'geral')
+    const messages = { c1: [msg('m1', 'c1', 'a1', 'done'), { ...msg('m2', 'c1', 'a1', 'done'), threadId: 'm1' }] }
+    const state = { conversations: [conversation], messages, settings: { ...inGroup(['c1']), folded: ['group:g1'] } as State['settings'] }
+    await render(state)
+    expect(shown(channelRow('geral'))).toBe(false)
+    await render({ ...state, conversations: [{ ...conversation, unread: 1 }] })
+    expect(channelRow('geral').className).toContain('is-unread')
+    expect(shown(channelRow('geral'))).toBe(false)
+  })
+
+  it('still keeps the channel row the person is in, in a folded section and group', async () => {
+    await render({
+      conversations: [ch('c1', 'geral'), ch('c2', 'outro')],
+      settings: { ...inGroup(['c1', 'c2']), folded: ['section:channels', 'group:g1'] } as State['settings'],
+      view: { kind: 'conversation', id: 'c2' }
+    })
+    expect(channelRow('outro').className).toContain('is-active')
+    expect(shown(channelRow('outro'))).toBe(true)
+    expect(shown(channelRow('geral'))).toBe(false)
+  })
+
+  it('still keeps the DM row the person is in, in a folded section', async () => {
+    await render({
+      agents: [agent({}), agent({ id: 'a2', name: 'Theo', handle: 'theo' })],
+      conversations: [dm({}), dm({ id: 'd2', name: 'a2', members: ['a2'] })],
+      settings: { folded: ['section:agents'] } as State['settings'],
+      view: { kind: 'conversation', id: 'd2' }
+    })
+    expect(row('Theo').className).toContain('is-active')
+    expect(shown(row('Theo'))).toBe(true)
+    expect(shown(row('Lia'))).toBe(false)
+  })
+
+  const team = { people: [ana, bia], you: 'ana' }
+  const teamState = { ...team, agents: [agent({ id: 'a2', name: 'Theo', handle: 'theo' })], conversations: [dm({ id: 'd2', name: 'a2', members: ['a2'] })], messages: { d2: [msg('m1', 'd2', 'a2', 'waiting_input')] }, settings: { folded: ['section:agents'] } as State['settings'] }
+  const inbox: Inbox = { approvals: [], questions: [{ id: 'm1', agentId: 'a2', text: 'Qual?', askedTo: 'me', requestedBy: 'me', state: 'open', deadlineAt: 0, createdAt: 0 }] }
+
+  it('with a team, does not light a question handed to someone else', async () => {
+    await render(teamState)
+    expect(shown(row('Theo'))).toBe(false)
+  })
+
+  it('with a team, lights a question in my inbox', async () => {
+    await render({ ...teamState, inbox })
+    expect(row('Theo').className).toContain('is-attention')
+    expect(shown(row('Theo'))).toBe(true)
   })
 })

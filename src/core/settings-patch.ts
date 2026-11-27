@@ -11,6 +11,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   context: { kind: 'string', max: 100_000 },
   routerModel: { kind: 'string', max: 200 },
   memoryModel: { kind: 'string', max: 200 },
+  defaultFallbackModel: { kind: 'string', max: 200, nullable: true },
   voice: { kind: 'object', max: 10_000, nullable: true },
   channelLayout: { kind: 'object', max: 500_000, nullable: true },
   orgLayout: { kind: 'object', max: 100_000, nullable: true },

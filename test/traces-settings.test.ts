@@ -35,7 +35,9 @@ beforeAll(async () => {
   db.createConversation({ id: 'screen-dm', kind: 'dm', name: 'screen', members: ['screen'] })
   db.createConversation({ id: 'screen-geral', kind: 'channel', name: 'screen-geral', members: ['screen'] })
   db.createConversation({ id: 'bia-dm', kind: 'dm', name: 'screen', members: ['screen'], owner: 'screen-member' })
-}, 30_000)
+  // Windows gets the config's 60 s (vitest.config.ts): booting the core there crossed 30 s when a Chrome
+  // test in the same shard held the CPU.
+}, process.platform === 'win32' ? 60_000 : 30_000)
 
 afterAll(async () => {
   await sink.close()

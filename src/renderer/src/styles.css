@@ -719,8 +719,10 @@ h3 {
 .fold-toggle[aria-expanded='true'] svg {
   transform: rotate(90deg);
 }
-/* What's folded goes, except where you are: the row you're in never disappears from under you. */
-.is-folded .nav-item:not(.is-active) {
+/* What's folded goes, except where you are and what waits on you: the row you're in and a row with a
+   question or an approval never disappear from under you. Unread and work in progress stay in the
+   header's badges, so folding still quiets the group. A next-steps card alone is none of these. */
+.is-folded .nav-item:not(.is-active):not(.is-attention) {
   display: none;
 }
 /* A row that shows up (a new one, or its section unfolding) rises into place. */
@@ -1363,6 +1365,33 @@ h3 {
 }
 .msg__body {
   min-width: 0;
+}
+/* The reply's own Markdown on the clipboard, at the foot of a finished reply: a dim glyph with no frame
+   of its own, and the check it turns into for a moment after the press. */
+.msg__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.msg__copy:hover,
+.msg__copy:focus-visible,
+.msg__copy.is-copied {
+  background: var(--bubble);
+  color: var(--text);
+}
+@media (pointer: coarse) {
+  .msg__copy {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 /* My messages: a bubble on the right, no avatar or name. */
 .msg--me {
@@ -3214,6 +3243,17 @@ h3 {
   justify-content: flex-end;
   margin-top: 8px;
 }
+/* In the footer it leads the row; on small screens it takes a row of its own. */
+.ask__recommend--foot {
+  flex: none;
+  justify-content: flex-start;
+  margin-top: 0;
+}
+@media (max-width: 760px) {
+  .ask__recommend--foot {
+    flex: 1 1 100%;
+  }
+}
 /* The Next steps mark in a card's head: an accent pill, quiet enough to sit next to the state. */
 .ask-option__pill {
   flex: none;
@@ -4081,6 +4121,11 @@ body.is-resizing webview {
   .steps__ask-pill__word {
     display: none;
   }
+}
+/* The glyph belongs to the footer line's own height, not to a 32 px button of its own. */
+.msg__meta .msg__copy {
+  min-width: 0;
+  min-height: 0;
 }
 
 /* The message whose thread is open on the side, lit, so the two sides read as one. */
@@ -12725,6 +12770,17 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 5px;
 }
+/* A computer on this Mac, asked on a card: the one access that runs as the person. */
+.proposal__risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warning, #d9480f);
+}
+.proposal__risk .icon {
+  flex: none;
+  margin-top: 2px;
+}
 /* Above the Tuca's chat on the builder screen: "Nova conversa", and its confirmation */
 .onb-tuca__bar {
   display: flex;
@@ -14973,7 +15029,7 @@ button.agent-card__now:hover {
 .section.is-folded .agent-sector__head {
   display: none;
 }
-.is-folded .agent-row:not(:has(> .nav-item.is-active)) {
+.is-folded .agent-row:not(:has(> .nav-item.is-active, > .nav-item.is-attention)) {
   display: none;
 }
 .is-folded .agent-sector__more {

@@ -120,6 +120,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           // A change with a part inside the app (effort) and a part that spends money (the month's limit).
           await callTool(turn.mcpUrl, 'propor_ajuste', { agente: 'nina', esforco: 'high', limite: 500_000, motivo: L('Tarefas mais difíceis.', 'Harder tasks.') })
           reply = L('Subi o esforço da Nina; o limite novo espera você confirmar.', "I raised Nina's effort; the new limit waits for you to confirm.")
+        } else if (/precisa de navegador/i.test(last)) {
+          // Access asked for on a card: it never goes in by itself.
+          const r = await callTool(turn.mcpUrl, 'propor_ajuste', { agente: 'nina', navegador: true, motivo: L('Pra abrir as páginas dos clientes.', "To open the clients' pages.") })
+          reply = textOf(r).includes('card') ? L('Pedi o navegador da Nina no card: é só aprovar.', "I asked for Nina's browser on the card: just approve it.") : textOf(r)
         } else if (/resumo di[aá]rio/i.test(last)) {
           await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'nina', nome: L('Resumo diário', 'Daily summary'), pedido: L('Resuma o dia.', 'Sum up the day.'), dias: [1, 2, 3, 4, 5], hora: '18:00' })
           reply = L('Criei a rotina.', 'I made the routine.')

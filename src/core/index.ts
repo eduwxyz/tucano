@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, routineCap, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type LentFolder, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, routineCap, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -917,8 +917,10 @@ const chrome =
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
 const transcriber = new Transcriber()
-// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads.
-const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(dataDir, 'voice') }
+// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads. That
+// folder is the desktop's, for every workspace, so a new workspace doesn't download hundreds of MB again; a model a
+// workspace downloaded into its own folder before is still found there.
+const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(installDir, 'voice'), own: join(dataDir, 'voice') }
 const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)))
 const dictation = async () => {
   const s = voiceStatus(settings().voice, await loginEnv(), undefined, voicePlaces)
@@ -1283,6 +1285,8 @@ const runner = new Runner({
   emit,
   workDir: join(dataDir, 'agents'),
   dataDir,
+  // What an agent can ask for on a card: an isolated Linux only where Docker is (never inside a server's container).
+  machine: { linux: !serverMode || onPath('docker'), here: serverMode ? 'server' : osOf() === 'mac' ? 'mac' : 'computer' },
   gateway,
   connectors,
   memory,
@@ -1446,6 +1450,25 @@ function returnChannelFolders(): void {
     const kept = folders.filter((f) => !('channelId' in f))
     if (kept.length < folders.length) setFolders(agent, kept)
   }
+}
+
+// A card's change to an agent. Folders don't go through saveAgent (it never stores them):
+// they are set apart, and a folder newly lent is checked again as lendFolder checks it, since the card
+// may have waited. `check`: false when undoing, which puts back folders that were lent before.
+function applyAgentChanges(agent: Agent, changes: AgentChanges, channelIds: string[], ctx: Ctx, check: boolean): void {
+  const { folders, ...rest } = changes
+  let lent: LentFolder[] | undefined
+  if (folders !== undefined) {
+    const had = new Set((agent.folders ?? []).map((f) => f.path))
+    lent = (folders ?? []).map((f) => {
+      if (!check || had.has(f.path)) return f
+      const why = checkFolder(f.path, { dataDir, named: true })
+      if (why) throw new UserError(why)
+      return { ...f, path: realpathSync(f.path) }
+    })
+  }
+  if (Object.keys(rest).length) api.saveAgent({ agent: { ...agent, ...rest }, channelIds }, ctx)
+  if (lent) setFolders(db.agent(agent.id) ?? agent, lent)
 }
 
 function setFolders(agent: Agent, folders: NonNullable<Agent['folders']>): void {
@@ -1693,7 +1716,7 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false, aut
     if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
     const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
     const prior = Object.fromEntries(Object.keys(p.changes).map((k) => [k, agent[k as keyof AgentChanges]])) as AgentChanges
-    api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
+    applyAgentChanges(agent, p.changes, channelIds, ctx, true)
     id = agent.id
     extra.undo = { until, prior }
   } else if (p.kind === 'routine') {
@@ -1918,7 +1941,7 @@ function undoOne(ctx: Ctx, messageId: string, index: number): void {
       const moved = changedSince(agent, p.changes)
       if (moved.length) throw new Error(undoErrors.changed(agent.name, moved))
       const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
-      api.saveAgent({ agent: { ...agent, ...p.undo.prior }, channelIds }, ctx)
+      applyAgentChanges(agent, p.undo.prior ?? {}, channelIds, ctx, false)
     }
   } else if (p.kind === 'team') unmake(ctx, messageId, p.agentIds ?? [], p.undo.stamps ?? {}, p.channel ? p.appliedId : undefined)
   else {
@@ -2827,7 +2850,10 @@ const api: Handlers = {
     bg(modelDownload.start(model), 'voiceDownload')
   },
   voiceCancelDownload: () => modelDownload.cancel(),
-  voiceRemoveModel: ({ model }) => modelDownload.remove(model),
+  voiceRemoveModel: ({ model }) => {
+    modelDownload.remove(model)
+    if (voicePlaces.own !== voicePlaces.models) rmSync(join(voicePlaces.own, VOICE_MODELS[model].file), { force: true }) // and an older copy of this workspace's
+  },
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
   updateSettings: ({ patch: { jevKey: _computed, classifierKeys: _computedKeys, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
