@@ -9,6 +9,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Corrigido:** o ditado não escreve mais os sons que o whisper anota, como "*Loud noise*" ou "[BLANK_AUDIO]", no meio da frase.
 > - **Corrigido:** um agente que **errava o nome de um parâmetro** de uma ferramenta (comum no Grok) recebia só "Faltou o que buscar" e tentava de novo até parar com "8 ferramentas falharam seguidas". Agora a resposta diz o que faltou e lista os parâmetros da ferramenta, e ele acerta na próxima.
 > - **Corrigido:** com o modelo do **roteador** sem limite (o Haiku, quando o Claude acaba), um **canal** ficava sem resposta, enquanto a DM com o mesmo agente seguia no modelo reserva. Agora o reserva dos agentes do canal escolhe quem responde, e a mensagem diz isso.
+> - **Corrigido:** o **modelo de voz** do ditado é baixado uma vez só pra todos os workspaces. Antes, cada workspace novo baixava de novo os 574 MB.
 
 ### Added
 
@@ -18,6 +19,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A call missing a parameter says which, with the tool's parameters.** Grok reaches Tucano's tools through `use_tool`, often by a name it read without the schema, and guessed parameter names (`query` for `busca`). The tool's own "missing what to search for" didn't say which, so it guessed again until "8 tools failed in a row" stopped the reply, and some agents sent real "schema" test messages to their teammates to work the format out. A call without what its tool requires now gets back what is missing, what was sent and the tool's parameters; nothing runs, and it still counts toward that stop. Grok is also told to look a tool's parameters up before its first call and never to call one just to test it.
 - **A channel answers when the router's model is out.** The router picked who answers with its own model only, Haiku by default: with Claude out of quota it gave up with "mention an agent", while a DM to the same agent moved to its reserve and answered. It now picks with the channel agents' reserve models (then their main ones) on another harness that is signed in, and its note says so ("Claude Code couldn't, Grok 4.7 decided").
+- **The voice model is downloaded once for every workspace.** Each workspace kept the model in its own data folder, so the microphone of a new workspace downloaded the 574 MB again. A download now goes to the desktop's folder, which every workspace reads first; a model a workspace downloaded before is still found in its own folder, so nothing is downloaded again or moved. On a server, with one workspace, nothing changes.
 - **Dictation drops the sounds whisper names.** A noise could come out as "*Loud noise*" or "[BLANK_AUDIO]" in the middle of a sentence, and went into the text. Sounds between asterisks or brackets are left out now; a multiplication like "2 * 3" or words in parentheses are kept.
 
 ## [0.2.50] - 2026-11-25
