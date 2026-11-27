@@ -206,6 +206,13 @@ const ROUTE = (): Record<NonNullable<EngineStatus['route']>, { label: string; to
 export function HarnessList(): ReactNode {
   const engines = useStore((s) => s.settings.engines)
   const chosen = useStore((s) => s.settings.harnesses)
+  // A saved pick whose check says it is not installed has no active checkbox to turn it off. Before
+  // the check finishes, installed:false means unknown, so keep every pick until the statuses settle.
+  useEffect(() => {
+    if (!chosen || ENGINE_IDS.some((e) => engines[e].checking)) return
+    const keep = chosen.filter((e) => engines[e].installed)
+    if (keep.length !== chosen.length) updateSettings({ harnesses: keep })
+  }, [chosen, engines])
   // Unpicked: the ones ready to run. Picking one off keeps the rest as they are.
   const picked = (e: EngineId): boolean => (chosen ? chosen.includes(e) : startsPicked(engines[e]))
   const toggle = (e: EngineId): void => {
