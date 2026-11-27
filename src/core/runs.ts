@@ -35,7 +35,7 @@ import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { loginsInOrder, nextLogin, noLoginLeft, primaryAccountOf, Spent, USUAL_LOGIN } from '../shared/primary-login'
-import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { ALWAYS_LOAD, missingArgs, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
@@ -1273,12 +1273,23 @@ export class Runner {
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
       const status = settings.engines[model.engine]
-      // The router's logins: the primary one first when one is set, then the others in order, each tried once.
-      const logins = loginsInOrder(settings, model.engine)
-      if (!status.installed || !logins.some((login) => login.ready)) return fail(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
-
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
+      // The router's model out of quota or not ready: the channel's agents' reserve models pick
+      // instead, as their replies would move to them, so a channel doesn't go quiet while a DM still answers.
+      const onReserve = async (why: string): Promise<void> => {
+        const reserves = routerReserves(members, settings, model.engine)
+        for (const alt of reserves) {
+          const rr = await during({ operation: 'router', sessionId: trigger, conversationId: conv.id }, () => route({ ...input, engine: engines[alt.engine], model: alt.id, cwd }))
+          if (rr.usage) db.addReceipt({ ...rr.usage, model: alt.id, ms: rr.ms, messageId: note.id, agentId: 'router', engine: alt.engine, at: Date.now() })
+          if (!('error' in rr)) return this.routed(conv, note, rr.agents, trigger, `${rr.reason}${fellBack} · ${L(`o ${ENGINES[model.engine].label} não pôde, decidiu o ${alt.label}`, `${ENGINES[model.engine].label} couldn't, ${alt.label} decided`)}`, parallel)
+        }
+        fail(why)
+      }
+      // The router's logins: the primary one first when one is set, then the others in order, each tried once.
+      const logins = loginsInOrder(settings, model.engine)
+      if (!status.installed || !logins.some((login) => login.ready)) return await onReserve(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+
       const tried = new Set<string>()
       let r: Awaited<ReturnType<typeof route>> | undefined
       for (let login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried }); login; login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried })) {
@@ -1290,8 +1301,8 @@ export class Runner {
         this.spent.mark(model.engine, login.id, Date.now())
       }
       const label = ENGINES[model.engine].label
-      if (!r) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
-      if ('error' in r && tried.size > 1 && outOfQuota(r.error)) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
+      if (!r) return await onReserve(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
+      if ('error' in r && outOfQuota(r.error)) return await onReserve(tried.size > 1 ? noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }) : friendly(r.error, { engine: label, doing: L('escolher quem responde', 'picking who answers') }).text)
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
       this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
@@ -1455,15 +1466,18 @@ export class Runner {
   // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
   // The agent's reserve, when it can take the reply: its model, and the account it runs on (unset: its harness's
   // usual login). None when it's the very login and model that just ran out, or when its login isn't ready.
-  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
-    const model = agent.fallbackModelId ? modelInfo(agent.fallbackModelId) : undefined
+  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { id: string; model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
+    // Its own reserve, else the workspace's (Settings › Models), which takes no account of its own.
+    const own = !!agent.fallbackModelId
+    const id = agent.fallbackModelId || settings.defaultFallbackModel
+    const model = id ? modelInfo(id) : undefined
     if (!model?.id) return undefined
     // An account of another harness (the reserve's model changed since) means the usual login, like the agent's own.
-    const account = agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
-    if (agent.fallbackModelId === agent.modelId && account?.id === from?.id) return undefined
+    const account = own && agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
+    if (id === agent.modelId && account?.id === from?.id) return undefined
     const status = settings.engines[model.engine]
     if (!status?.installed || (account ? !account.loggedIn : !status.loggedIn)) return undefined
-    return { model, account }
+    return { id: id!, model, account }
   }
 
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
@@ -3243,6 +3257,15 @@ ${note}`,
             true
           )
         }
+        // Without what the tool requires: said with its parameters, counted as a failed call (the brake
+        // still stops a model that keeps guessing), and nothing runs. See missingArgs.
+        const def = toolDefs.find((t) => t.name === name)
+        const lacking = def ? missingArgs(def, args) : undefined
+        if (lacking) {
+          addSteps({ id: randomUUID(), label: L('Chamada sem parâmetro', 'Call missing a parameter'), detail: name, status: 'error', tool: name, error: resultText(lacking).split('\n')[0] })
+          if (++failing >= ERRORS_STOP) halt('errors')
+          return lacking
+        }
         inFlight++
         acted = true
         sign()
@@ -3468,7 +3491,7 @@ ${note}`,
         plan = undefined
         input = whole
         onReserve = true
-        modelId = agent.fallbackModelId!
+        modelId = reserve.id
         modelName = reserve.model.id
         engineId = reserve.model.engine
         replyTrace?.movedTo(engineId, modelName)
@@ -4835,4 +4858,22 @@ ${note}`,
       this.checkIdle()
     }
   }
+}
+
+// Models that may pick who answers in a channel when the router's own can't: the reserve
+// models of the channel's agents (the workspace's default reserve for one without its own), then
+// their main ones, on another harness that's signed in.
+export function routerReserves(members: Agent[], settings: Pick<Settings, 'engines' | 'defaultFallbackModel'>, out: EngineId): NonNullable<ReturnType<typeof modelInfo>>[] {
+  const ids = [...members.map((a) => a.fallbackModelId || settings.defaultFallbackModel), ...members.map((a) => a.modelId)].filter((id): id is string => !!id)
+  const seen = new Set<string>()
+  const list: NonNullable<ReturnType<typeof modelInfo>>[] = []
+  for (const id of ids) {
+    const m = usable(modelInfo(id))
+    if (!m || m.engine === out || seen.has(m.id)) continue
+    const st = settings.engines[m.engine]
+    if (!st?.installed || !st.loggedIn) continue
+    seen.add(m.id)
+    list.push(m)
+  }
+  return list.slice(0, 2)
 }

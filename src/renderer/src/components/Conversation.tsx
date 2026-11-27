@@ -10,8 +10,8 @@ import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
-import { saidAt } from '../../../shared/types'
-import { CUT, canContinue } from '../../../shared/run-progress'
+import { saidAt, type Run } from '../../../shared/types'
+import { CUT, WORKLESS_LABELS, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -66,6 +66,7 @@ import { canEditChannel,
   countedTokens,
   sendMessage,
   updateSettings,
+  toast,
   typing,
   setTab,
   stopRun,
@@ -533,6 +534,39 @@ const NO_ATTACHED: Artifact[] = []
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
+// A step that came back and finished, beyond the row that closes a cut reply: evidence that the words
+// after it are an answer, not narration from a reply stopped while it was still thinking.
+const answered = (run: Run): boolean =>
+  (run.steps ?? []).some((s) => s.status === 'done' && s.kind !== 'steer' && !WORKLESS_LABELS.includes(s.label))
+
+// The glyph is for a finished reply, and for a stopped one whose words came after work came back.
+export const canCopyMarkdown = (message: Message): boolean =>
+  message.author.kind === 'agent' && !!message.text.trim() && (message.run?.status === 'done' || (message.run?.status === 'stopped' && answered(message.run)))
+
+// The reply as it was written, not as the screen drew it: its own Markdown, on the clipboard, for a
+// note, a doc or another window. It sits at the head of a finished reply's footer, before its numbers.
+export function CopyMarkdown({ text }: { text: string }): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
+  const copy = (): void => {
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true)
+        if (timer.current) window.clearTimeout(timer.current)
+        timer.current = window.setTimeout(() => setCopied(false), 1600)
+      })
+      .catch(() => toast(L('Não deu pra copiar a resposta.', 'Could not copy the reply.')))
+  }
+  const label = L('Copiar como Markdown', 'Copy as Markdown')
+  return (
+    <button type="button" className={`msg__copy${copied ? ' is-copied' : ''}`} title={label} aria-label={label} onPointerDown={(e) => e.preventDefault()} onClick={copy}>
+      <Icon name={copied ? 'check' : 'copy'} size={16} />
+    </button>
+  )
+}
+
 const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, askReplies }: { message: Message; grouped: boolean; replies?: Message[]; ask?: Message; askReplies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
@@ -557,7 +591,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
   // Each request once: a reply saved before follow-ups stopped being listed again may hold one twice.
   const handedTo = (message.run?.delegations ?? []).filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i)
-  const hasFooter = !!message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)
+  const copyable = canCopyMarkdown(message)
+  const stoppedAnswer = message.author.kind === 'agent' && message.run?.status === 'stopped' && !!message.text.trim() && answered(message.run)
+  const hasFooter = stoppedAnswer || !!message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)
   const resumable = !!message.run && (message.run.status === 'paused' || (CUT.includes(message.run.status) && canContinue(message.run)))
   const retryable = !!message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit))))
 
@@ -724,6 +760,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             {retryable && <TryAgain messageId={message.id} />}
             {hasFooter && (
               <>
+                {copyable && <CopyMarkdown text={message.text} />}
                 {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
                 {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
               </>
