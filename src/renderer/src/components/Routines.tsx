@@ -1,7 +1,7 @@
 // Routines (spec §14, §17): requests for an agent that run on their own, at a
 // time or when something happens (a new item in a connector, a call on the Mac).
-// Two ways to see them: the week (the default), with the ones that run several times a day in a
-// strip above the hours, and a light list that starts with what needs me.
+// Two ways to see them: the week (the default), where every run sits at its own hour, and a light
+// list that starts with what needs me.
 import { L, lang, locale } from '../../../shared/lang'
 import { nodeOf } from '../../../shared/node-link'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -45,7 +45,7 @@ import { Card, Field, Sheet, Toggle } from './Pages'
 import { AgentAvatar, Icon, ownColor, shiftWeek, startOfWeek, weekRange } from './ui'
 import { Modal } from './Modal'
 import { Select } from './Select'
-import { chipOcc, FAILED, failedWords, finished, firstLine, isOff, listSections, markOf, nextWords, routineWords, splitWeek, stripDay, waitWords, WAITS, type Need, type Occ } from './routines-view'
+import { FAILED, failedWords, finished, firstLine, isOff, listSections, markOf, nextWords, routineWords, waitWords, WAITS, type Need, type Occ } from './routines-view'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
 const DAY_NAMES = (): string[] => (lang() === 'en' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'])
@@ -192,7 +192,7 @@ export function RoutinesPage(): ReactNode {
   const end = dayAt(week, 7)
   // A routine that's off keeps its place in the week; a deleted one leaves it with its runs.
   const occs = [...runs, ...planned(routines, week, now)].filter((o) => o.routine && o.at >= week && o.at < end)
-  const { grid, strip } = splitWeek(occs)
+  const grid = occs
   const failedHere = occs.filter((o) => !o.upcoming && o.status && FAILED.has(o.status) && mine(o.agentId)).length
   const onlyProblems = problems && failedHere > 0
   // Dimmed: another agent's (with one picked), or one that went fine while looking at what failed.
@@ -299,7 +299,6 @@ export function RoutinesPage(): ReactNode {
           <Calendar
             days={days}
             grid={grid}
-            strip={strip}
             h0={h0}
             h1={h1}
             now={now}
@@ -433,7 +432,6 @@ const statusWords = (o: Occ): string => (o.upcoming ? (isOff(o) ? L('desligada',
 function Calendar({
   days,
   grid,
-  strip,
   h0,
   h1,
   now,
@@ -446,7 +444,6 @@ function Calendar({
 }: {
   days: number[]
   grid: Occ[]
-  strip: Occ[]
   h0: number
   h1: number
   now: number
@@ -522,37 +519,6 @@ function Calendar({
           )
         })}
       </div>
-      {strip.length > 0 && (
-        <div className="cal__strip">
-          <span className="cal__strip-label">{L('o dia todo', 'all day')}</span>
-          {days.map((d) => (
-            <div key={d} className={`cal__strip-day ${new Date(d).toDateString() === today ? 'is-today' : ''}`}>
-              {stripDay(strip, d).map((chip) => {
-                const a = agents.find((x) => x.id === chip.routine.agentId)
-                const occ = chipOcc(chip)
-                const live = chip.ticks.some((t) => t.status === 'working')
-                const off = isOff({ routine: chip.routine })
-                return (
-                  <button
-                    key={chip.routine.id}
-                    className={`cal__allday c-${a?.color ?? 'graphite'} ${off ? 'is-off' : ''} ${dim(chip.ticks) ? 'is-dim' : ''} ${chip.ticks.some((t) => t.key === selected) ? 'is-selected' : ''} ${live ? 'is-live' : ''}`}
-                    style={a ? ownColor(a) : undefined}
-                    title={`${chip.routine.name} · ${routineWords(chip.routine)}`}
-                    onClick={(e) => onPick(occ, e.currentTarget.getBoundingClientRect())}
-                  >
-                    <span className="cal__allday-name">{chip.routine.name}</span>
-                    <span className="cal__ticks" aria-hidden>
-                      {chip.ticks.map((t) => (
-                        <i key={t.key} className={`is-${markOf(t)}`} title={`${hm(t.at)} · ${statusWords(t)}`} />
-                      ))}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      )}
       <div className="cal__scroll" ref={scroller}>
         <div className="cal__grid" style={{ height: total }}>
           <div className="cal__hours">
@@ -876,7 +842,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
   }, [rect, occ.key])
   useEffect(() => {
     const away = (e: MouseEvent): void => {
-      if (!ref.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest('.cal__ev, .cal-watch__chip, .cal__allday, .rt-open, .rt-more')) onClose()
+      if (!ref.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest('.cal__ev, .cal-watch__chip, .rt-open, .rt-more')) onClose()
     }
     window.addEventListener('mousedown', away)
     return () => window.removeEventListener('mousedown', away)

@@ -15348,88 +15348,7 @@ button.agent-card__now:hover {
   color: var(--text-2);
 }
 
-/* The week: routines that run several times a day sit in "o dia todo", above the hours, one chip a
-   day with a tick per run. The grid keeps the ones at one time, with room for the name. */
-.cal__strip {
-  flex: none;
-  display: grid;
-  grid-template-columns: 52px repeat(7, minmax(0, 1fr));
-  max-height: 30vh;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--border);
-}
-.cal__strip-label {
-  padding: 9px 10px 0 0;
-  font-size: 10.5px;
-  line-height: 1.2;
-  text-align: right;
-  color: var(--text-3);
-}
-.cal__strip-day {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  min-height: 40px;
-  padding: 5px 3px;
-  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-}
-.cal__strip-day.is-today {
-  background-color: color-mix(in srgb, var(--accent) 3%, transparent);
-}
-.cal__allday {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding: 4px 6px 5px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--agent) 14%, var(--panel));
-  box-shadow: inset 2.5px 0 0 var(--agent);
-  text-align: left;
-  font-size: 11px;
-  line-height: 1.25;
-  cursor: pointer;
-  transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
-  --rise: 3px;
-  animation: rise var(--dur-enter) var(--ease-out) both;
-}
-.cal__allday:hover {
-  transform: translateY(-1px);
-  box-shadow: inset 2.5px 0 0 var(--agent), 0 6px 16px rgba(60, 40, 20, 0.12);
-}
-.cal__allday.is-selected {
-  box-shadow: inset 2.5px 0 0 var(--agent), 0 0 0 2px var(--text);
-}
-/* Off, in the strip: the same grey read as in the hours. */
-.cal__allday.is-off {
-  background: var(--hover);
-  box-shadow: inset 2.5px 0 0 var(--border-strong);
-  filter: grayscale(1);
-  opacity: 0.6;
-}
-.cal__allday.is-off .cal__allday-name {
-  color: var(--text-2);
-  font-weight: 500;
-}
-.cal__allday.is-dim {
-  opacity: 0.25;
-}
-.cal__allday-name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-weight: 600;
-  color: var(--text);
-}
-.cal__ticks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-}
-/* A tick per run: green done, a red square failed, amber waits on me, orange running, dim still to come. */
-.cal__ticks > i,
+/* A mark on a block: green done, a red square failed, amber waiting on me. */
 .cal__mark {
   flex: none;
   width: 5px;
@@ -15437,33 +15356,18 @@ button.agent-card__now:hover {
   border-radius: 50%;
   background: color-mix(in srgb, var(--text-3) 45%, transparent);
 }
-.cal__ticks > .is-ok,
 .cal__mark.is-ok {
   background: var(--ok);
 }
-.cal__ticks > .is-bad,
 .cal__mark.is-bad {
   background: var(--danger);
   border-radius: 1px;
 }
-.cal__ticks > .is-wait,
 .cal__mark.is-wait {
   background: var(--warn);
 }
 .cal-pop__runs button.is-wait {
   background: var(--warn);
-}
-.cal__ticks > .is-live {
-  background: var(--accent);
-  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
-}
-.cal__ticks > .is-off {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--text-3);
-}
-.cal__mark {
-  width: 6px;
-  height: 6px;
 }
 .cal__ev.cal__ev--two {
   height: 34px;
@@ -15760,9 +15664,7 @@ button.agent-card__now:hover {
   color: var(--text-3);
 }
 @media (prefers-reduced-motion: reduce) {
-  .cal__allday,
   .rt-need__body,
-  .cal__ticks > .is-live,
   .rt-row__next.is-watch > i::after {
     animation: none;
   }

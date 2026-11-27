@@ -1,9 +1,9 @@
-// The routines page's logic (src/renderer/src/components/routines-view.ts): which routines leave the
-// hour grid for the "o dia todo" strip, how the list is split and ordered, and the short words it uses.
+// The routines page's logic (src/renderer/src/components/routines-view.ts): the marks on each run,
+// how the list is split and ordered, and the short words it uses. Every run stays in the hour grid.
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import type { Message, Routine, RunStatus } from '../src/shared/types'
-import { allDay, chipOcc, failedWords, firstLine, isOff, listSections, markOf, nextWords, routineWords, scheduleWords, splitWeek, stripDay, type Occ } from '../src/renderer/src/components/routines-view'
+import { failedWords, firstLine, isOff, listSections, markOf, nextWords, routineWords, scheduleWords, type Occ } from '../src/renderer/src/components/routines-view'
 
 const at = (d: number, h = 0, mi = 0): number => new Date(2026, 10, d, h, mi).getTime() // November 2026; the 16th is a Monday
 const WEEKDAYS = [1, 2, 3, 4, 5]
@@ -24,39 +24,7 @@ const upcoming = (r: Routine, when: number): Occ => ({ key: `${r.id}-${when}`, r
 
 afterEach(() => setLang('pt'))
 
-describe('the strip: routines that run several times a day', () => {
-  const vigia = routine('vigia', { schedule: { days: WEEKDAYS, time: '09:00', times: hourly } })
-  const briefing = routine('briefing', { schedule: { days: WEEKDAYS, time: '08:30' } })
-
-  it('takes the ones with several times, and only those', () => {
-    expect(allDay(vigia)).toBe(true)
-    expect(allDay(routine('two', { schedule: { days: WEEKDAYS, time: '09:00', times: ['09:00', '18:00'] } }))).toBe(true)
-    expect(allDay(routine('month', { schedule: { days: [], time: '08:00', times: ['08:00', '20:00'], monthDay: 5 } }))).toBe(true)
-    expect(allDay(briefing)).toBe(false)
-    expect(allDay(routine('once', { schedule: { days: [1], time: '09:00', once: true } }))).toBe(false)
-    expect(allDay(routine('hook', { trigger: { kind: 'webhook', token: 't' }, schedule: { days: WEEKDAYS, time: '09:00', times: hourly } }))).toBe(false)
-  })
-
-  it('splits the week: one-time runs in the grid, several-a-day in the strip, and an occurrence with no routine still in the grid', () => {
-    const gone: Occ = { key: 'x', name: 'Apagada', agentId: 'a1', at: at(16, 10), conversationId: 'c1', status: 'done' }
-    const occs = [run(vigia, at(16, 9), 'done'), run(briefing, at(16, 8, 30), 'done'), upcoming(vigia, at(16, 14)), gone]
-    const { grid, strip } = splitWeek(occs)
-    expect(grid.map((o) => o.key)).toEqual([occs[1]!.key, 'x'])
-    expect(strip).toHaveLength(2)
-  })
-
-  it('makes one chip a day per routine, a tick per run in order, and opens on the day’s failure', () => {
-    const discord = routine('discord', { schedule: { days: WEEKDAYS, time: '10:00', times: ['10:00', '12:00', '14:00', '16:00'] } })
-    const occs = [upcoming(vigia, at(16, 14)), run(vigia, at(16, 11), 'failed'), run(vigia, at(16, 9), 'done'), run(vigia, at(16, 10), 'done'), run(discord, at(16, 10), 'done'), upcoming(vigia, at(17, 9))]
-    const chips = stripDay(occs, at(16))
-    expect(chips.map((c) => c.routine.id)).toEqual(['vigia', 'discord'])
-    expect(chips[0]!.ticks.map(markOf)).toEqual(['ok', 'ok', 'bad', 'todo'])
-    expect(chipOcc(chips[0]!).at).toBe(at(16, 11))
-    expect(chipOcc(chips[1]!).at).toBe(at(16, 10))
-    expect(stripDay(occs, at(17))[0]!.ticks).toHaveLength(1)
-    expect(chipOcc(stripDay(occs, at(17))[0]!).upcoming).toBe(true)
-  })
-
+describe('the marks on a run', () => {
   it('reads a routine that’s off as off, not as still to come, and keeps what it did', () => {
     const off = routine('Desligada', { enabled: false })
     expect(isOff(upcoming(off, at(16, 18)))).toBe(true)
@@ -66,6 +34,13 @@ describe('the strip: routines that run several times a day', () => {
     expect(markOf(run(off, at(16, 9), 'failed'))).toBe('bad')
     // A one-off that already ran is off by itself, done — not a routine someone turned off.
     expect(isOff({ routine: routine('Feita', { enabled: false, schedule: { days: [1], time: '09:00', once: true }, lastAt: at(16, 9) }) })).toBe(false)
+  })
+
+  it('marks every run of a several-times-a-day routine on its own', () => {
+    const vigia = routine('vigia', { schedule: { days: WEEKDAYS, time: '09:00', times: hourly } })
+    const day = at(16)
+    const runs = [run(vigia, at(16, 9), 'done'), run(vigia, at(16, 10), 'failed'), upcoming(vigia, at(16, 11))]
+    expect(runs.filter((o) => o.at >= day && o.at < at(17)).map((o) => markOf(o))).toEqual(['ok', 'bad', 'todo'])
   })
 
   it('marks a run: waiting on me amber, running live, stopped as off', () => {
