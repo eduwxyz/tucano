@@ -99,3 +99,33 @@ it.skipIf(!existsSync(chromium.executablePath()))('lines up system lines with th
     expect(edges.notice.width).toBe(edges.message.width)
   } finally { await browser.close() }
 })
+
+it.skipIf(!existsSync(chromium.executablePath()))('keeps the rows that wait on the person inside a fold, and hides the rest', async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    await page.setContent(`
+      <style>${readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')}</style>
+      <div class="section is-folded">
+        <div class="channel-group is-folded">
+          <button class="nav-item is-attention">asked in a channel</button>
+          <button class="nav-item is-unread">unread</button>
+          <button class="nav-item is-active">where you are</button>
+          <button class="nav-item">quiet</button>
+        </div>
+        <div class="agent-sector is-folded">
+          <div class="agent-row"><button class="nav-item is-attention">asked me</button></div>
+          <div class="agent-row"><button class="nav-item">quiet agent</button></div>
+        </div>
+      </div>`)
+    const display = await page.locator('.nav-item').evaluateAll((els) => els.map((el) => [el.textContent, getComputedStyle(el).display]))
+    expect(display).toEqual([
+      ['asked in a channel', 'flex'],
+      ['unread', 'none'],
+      ['where you are', 'flex'],
+      ['quiet', 'none'],
+      ['asked me', 'flex'],
+      ['quiet agent', 'none']
+    ])
+  } finally { await browser.close() }
+})
