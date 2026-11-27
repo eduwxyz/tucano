@@ -29,6 +29,34 @@ export interface Session {
 
 export const textResult = (text: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text }], isError })
 
+// A call without what its tool requires, said with the tool's parameters. A harness that keeps
+// the tools behind a search (Grok's use_tool) lets the model call one by a name it read without its
+// schema: it guesses the parameter names, and a tool's own "missing what to search for" doesn't say
+// which, so it guessed again until the run stopped. Nothing runs; the next call has what it needs.
+export function missingArgs(tool: ToolDef, args: Record<string, unknown>): CallToolResult | undefined {
+  const required = tool.inputSchema.required ?? []
+  const missing = required.filter((k) => args[k] === undefined || args[k] === null)
+  if (!missing.length) return undefined
+  const props = tool.inputSchema.properties ?? {}
+  const params = Object.entries(props).map(([k, v]) => {
+    const p = (v && typeof v === 'object' ? v : {}) as { type?: unknown; description?: unknown }
+    const type = typeof p.type === 'string' ? p.type : 'any'
+    const desc = typeof p.description === 'string' ? `: ${p.description.slice(0, 160)}` : ''
+    return `- ${k} (${type}${required.includes(k) ? L(', obrigatório', ', required') : ''})${desc}`
+  })
+  const sent = Object.keys(args).filter((k) => !k.startsWith('_'))
+  return textResult(
+    [
+      L(`Faltou ${missing.map((k) => `"${k}"`).join(', ')} em ${tool.name}. Nada foi feito.`, `Missing ${missing.map((k) => `"${k}"`).join(', ')} in ${tool.name}. Nothing was done.`),
+      sent.length ? L(`Você mandou: ${sent.join(', ')}.`, `You sent: ${sent.join(', ')}.`) : L('Você não mandou nenhum parâmetro.', 'You sent no parameters.'),
+      L('Os parâmetros dela:', 'Its parameters:'),
+      ...params,
+      L('Chame de novo com esses nomes.', 'Call it again with these names.')
+    ].join('\n'),
+    true
+  )
+}
+
 // Between two turns of a kept session: the process may list its tools again, but nothing runs.
 const parked = (tools: ToolDef[]): Session => ({
   tools,

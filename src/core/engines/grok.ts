@@ -136,8 +136,8 @@ function searchQuery(ev: Record<string, unknown>): string {
 // bare name fails and costs the agent a try.
 const gatewayNote = (): string =>
   L(
-    `As ferramentas do Tucano estão no servidor MCP \`${GATEWAY_NAME}\`. Chame com use_tool pelo nome completo, \`${GATEWAY_NAME}__<nome>\` (por exemplo \`${GATEWAY_NAME}__lembrar\`); search_tool lista as que existem.`,
-    `Tucano's tools are on the \`${GATEWAY_NAME}\` MCP server. Call them with use_tool by their full name, \`${GATEWAY_NAME}__<name>\` (for example \`${GATEWAY_NAME}__lembrar\`); search_tool lists the ones there are.`
+    `As ferramentas do Tucano estão no servidor MCP \`${GATEWAY_NAME}\`. Chame com use_tool pelo nome completo, \`${GATEWAY_NAME}__<nome>\` (por exemplo \`${GATEWAY_NAME}__lembrar\`); search_tool lista as que existem, com os parâmetros de cada uma. Antes de usar uma ferramenta pela primeira vez, veja os parâmetros dela com search_tool: os nomes são em português (busca, pasta, texto…), não chute. Nunca chame uma ferramenta só pra testar o formato: cada chamada faz de verdade o que ela faz.`,
+    `Tucano's tools are on the \`${GATEWAY_NAME}\` MCP server. Call them with use_tool by their full name, \`${GATEWAY_NAME}__<name>\` (for example \`${GATEWAY_NAME}__lembrar\`); search_tool lists the ones there are, with each one's parameters. Before using a tool for the first time, look up its parameters with search_tool: the names are in Portuguese (busca, pasta, texto…), don't guess. Never call a tool just to test its format: every call really does what the tool does.`
   )
 
 // Headless, one shot. The prompt is a file: Grok does not read the prompt from
