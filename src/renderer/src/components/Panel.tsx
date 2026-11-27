@@ -1,8 +1,8 @@
 // What agents make on their computers, in the chat: artifact cards and
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
-import { useState, type ReactNode } from 'react'
-import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, closePanel, widenPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, closePanel, widenPanel, revealArtifact, stopService, toast, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
@@ -406,6 +406,34 @@ export function WidenButton(): ReactNode {
   )
 }
 
+// A text file's whole contents on the clipboard. The glyph turns into a check with "Copiado" for a
+// moment, like every other copy in the app, so the click is never silent; a file it can't read says so.
+export function CopyArtifact({ id }: { id: string }): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
+  const copy = (): void => {
+    void call('artifactText', { id })
+      .then((t) => {
+        if (t == null) throw new Error('unreadable')
+        return navigator.clipboard.writeText(t)
+      })
+      .then(() => {
+        setCopied(true)
+        if (timer.current) window.clearTimeout(timer.current)
+        timer.current = window.setTimeout(() => setCopied(false), 1600)
+      })
+      .catch(() => toast(L('Não deu pra copiar o arquivo.', 'Could not copy the file.')))
+  }
+  const label = copied ? L('Copiado', 'Copied') : L('Copiar', 'Copy')
+  return (
+    <button type="button" className={copied ? 'btn btn--sm btn--ghost is-copied' : 'icon-btn'} title={label} aria-label={label} onClick={copy}>
+      <Icon name={copied ? 'check' : 'copy'} size={14} />
+      {copied && ` ${label}`}
+    </button>
+  )
+}
+
 export function SidePanel(): ReactNode {
   const panel = useStore((s) => s.panel)
   const artifact = useStore((s) => (s.panel?.kind === 'artifact' ? s.artifacts.find((a) => a.id === (s.panel as { id: string }).id) : undefined))
@@ -437,6 +465,7 @@ export function SidePanel(): ReactNode {
             <Icon name="down" size={14} /> {saveLabel()}
           </button>
         )}
+        {artifact && (artifact.kind === 'markdown' || artifact.kind === 'text' || artifact.kind === 'csv') && <CopyArtifact id={artifact.id} />}
         {service?.url && (
           <>
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
