@@ -56,6 +56,13 @@ IDENTITY="${TUCANO_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | a
 [ -n "$IDENTITY" ] || { echo "No Developer ID Application certificate in the keychain." >&2; exit 1; }
 export APPLE_KEYCHAIN_PROFILE="${TUCANO_NOTARY_PROFILE:-tucano}"
 
+# electron-builder packs the app's dependencies from node_modules. A symlinked folder packs
+# only the top-level ones, and an out-of-date one packs the wrong ones: 0.2.52's Mac build
+# shipped without electron-updater's fs-extra and quit at launch. So this checkout needs
+# its own node_modules, matching package-lock.json (npm ci).
+[ -L node_modules ] && { echo "node_modules is a symlink: run npm ci in this checkout." >&2; exit 1; }
+npm ls --omit=dev >/dev/null 2>&1 || { echo "node_modules doesn't match package-lock.json: run npm ci." >&2; exit 1; }
+
 npm run build
 # Dictation's whisper-cli, built for each chip and signed with the app (scripts/whisper.mjs).
 node scripts/whisper.mjs mac arm64
@@ -65,6 +72,16 @@ npx electron-builder --mac dmg zip --arm64 --x64 --publish never \
   --config.mac.identity="$IDENTITY" \
   --config.mac.notarize=true \
   --config.artifactName='tucano-mac-${arch}.${ext}'
+
+# Each app.asar must hold the dependencies' dependencies too, not only package.json's list.
+for APP in "$OUT/mac-arm64/Tucano.app" "$OUT/mac/Tucano.app"; do
+  node --input-type=module -e '
+const { listPackage } = await import("@electron/asar")
+const files = new Set(listPackage(process.argv[1], { isPack: false }))
+const missing = ["fs-extra", "builder-util-runtime", "zod", "express"].filter((m) => !files.has("/node_modules/" + m))
+if (missing.length) { console.error(process.argv[1] + " lacks " + missing.join(", ")); process.exit(1) }
+' "$APP/Contents/Resources/app.asar"
+done
 
 # The apps inside are notarized and stapled; each .dmg gets its own ticket too,
 # so a browser download opens without asking. The two go to Apple together.
