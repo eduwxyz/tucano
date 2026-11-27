@@ -18,7 +18,7 @@ import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep }
 import { pathToFileURL } from 'node:url'
 import { serveArtifact } from './artifact-http'
 import { Forwarder, isPrivate } from './forward'
-import { attachment, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
+import { ARTIFACT_CSP, attachment, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
 import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
 import { NodeLinkHttp } from './node-link-http'
@@ -137,6 +137,7 @@ function fromCore(msg: CoreRequest): void {
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
   if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'mcp-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'doc-file-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
@@ -595,6 +596,19 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
   // What the agents showed in the chat, sandboxed as on the desktop, or saved (?download).
   // Only who sees the conversation it was shown in (someone else's DM: not found).
   if (serveArtifact(res, url, { dataDir, may: (id) => grants.may(who.person ?? ownerId, { artifact: id }), type: (path) => TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream' })) return
+
+  // A document (Documentos): the core says where its file is when this person may see it (`v`: an older version).
+  // A refusal and a missing file answer the same, so nothing says a document is there.
+  const docMatch = /^\/doc\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
+  if (docMatch) {
+    const v = Number(url.searchParams.get('v')) || undefined
+    void ask<{ path: string; kind: string } | null>({ type: 'doc-file', person: who.person ?? ownerId ?? '', doc: docMatch[1]!, ...(v ? { v } : {}) }).then((found) => {
+      if (!found || !normalize(found.path).startsWith(resolve(join(dataDir, 'documents')) + sep)) return void res.writeHead(404, BASE_HEADERS).end()
+      // A document is its readers' alone: nothing between the server and the browser keeps a copy of it.
+      file(res, found.path, { 'content-security-policy': ARTIFACT_CSP, 'cache-control': 'private, no-store', ...(found.kind === 'html' ? { 'content-type': 'text/html; charset=utf-8' } : {}) })
+    })
+    return
+  }
 
   if (url.pathname === '/tucano-web.js') return void res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES['.js']! }).end(WEB)
   if (url.pathname === '/' || url.pathname === '/index.html') return void res.writeHead(200, { ...PAGE_HEADERS, 'content-type': TYPES['.html']!, 'cache-control': 'no-cache' }).end(index())

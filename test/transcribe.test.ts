@@ -32,6 +32,24 @@ describe.runIf(unix)('finding whisper', () => {
     expect(voiceStatus(undefined, { PATH: dir }, dir)).toEqual({ bin, model: join(models, 'ggml-large-v3-turbo.bin'), ready: true })
   })
 
+  it('looks in the folder every workspace shares, then in the workspace’s own', () => {
+    const bin = script(dir, 'exit 0')
+    const shared = join(dir, 'voice')
+    const own = join(dir, 'workspaces', 'w1', 'voice')
+    const file = 'ggml-large-v3-turbo-q5_0.bin'
+    mkdirSync(shared, { recursive: true })
+    mkdirSync(own, { recursive: true })
+    const places = { models: shared, own }
+    // Downloaded before the folder was shared: found where it is, nothing to download again.
+    writeFileSync(join(own, file), '')
+    expect(voiceStatus(undefined, { PATH: dir }, dir, places)).toEqual({ bin, model: join(own, file), ready: true, ownModel: 'recommended', downloaded: ['recommended'] })
+    // In the shared folder: that one, first.
+    writeFileSync(join(shared, file), '')
+    expect(voiceStatus(undefined, { PATH: dir }, dir, places)).toMatchObject({ model: join(shared, file), ownModel: 'recommended', downloaded: ['recommended'] })
+    // A new workspace, with nothing of its own, uses the shared one.
+    expect(voiceStatus(undefined, { PATH: dir }, dir, { models: shared, own: join(dir, 'workspaces', 'w2', 'voice') })).toMatchObject({ model: join(shared, file), ready: true })
+  })
+
   it('a path set by the person wins, and one that is gone is not ready', () => {
     const bin = script(dir, 'exit 0')
     const model = join(dir, 'meu.bin')
@@ -105,6 +123,12 @@ describe.runIf(unix)('transcribing', () => {
   it('drops what whisper prints for silence', () => {
     expect(cleanTranscript('[BLANK_AUDIO]\n (Música) \n')).toBe('')
     expect(cleanTranscript(' Primeira linha\n [inaudível]\n segunda linha\n')).toBe('Primeira linha segunda linha')
+    // Sounds whisper names between asterisks, on a line or in the middle of one, are not words either.
+    expect(cleanTranscript(" Hi, I'm talking here, etc. All right. *Loud noise*\n")).toBe("Hi, I'm talking here, etc. All right.")
+    expect(cleanTranscript(' *risos*\n')).toBe('')
+    expect(cleanTranscript(' Bom dia [BLANK_AUDIO] tudo bem?\n')).toBe('Bom dia tudo bem?')
+    // What is said is kept as said: a word in parentheses or a multiplication isn't a sound.
+    expect(cleanTranscript(' Custa 2 * 3 reais (mais ou menos).\n')).toBe('Custa 2 * 3 reais (mais ou menos).')
   })
 })
 
@@ -133,7 +157,7 @@ describe('turning dictation on: the model download', () => {
     const d = new ModelDownload(dir, () => changes.push(d.progress?.received ?? -1), serve(body), models)
     await d.start('recommended')
     expect(existsSync(join(dir, 'ggml-test-turbo.bin'))).toBe(true)
-    expect(existsSync(join(dir, 'ggml-test-turbo.bin.part'))).toBe(false)
+    expect(readdirSync(dir).filter((f) => f.endsWith('.part'))).toEqual([])
     expect(d.progress).toBeNull()
     expect(d.error).toBeNull()
     expect(changes.at(-1)).toBe(-1) // the last word: done

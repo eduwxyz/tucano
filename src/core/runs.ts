@@ -9,16 +9,18 @@ import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { GrantLevel, LeaveAsk, TucaLeave } from '../shared/types'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf, isAccessChange, onlyAccessChanges } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
-import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
+import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, folderToLend, stepFor, type Computers } from './computer'
 import type { Vault } from './vault'
 import { COFRE, keyNameError, loginOrigin, PEDIR_CHAVE } from '../shared/vault'
 import { extractFile } from './wiki-extract'
+import type { Docs } from './docs'
+import { DOCS_TOOL_NAMES, DOCS_TOOLS, docsCall } from './docs-tools'
 import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
 import { noNewsPhrase, noNewsRun } from '../shared/routine-news'
@@ -26,14 +28,14 @@ import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
 import { LER_GUIA, readGuide } from './guide'
-import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
+import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState, type Machine } from './tuca-help'
 import { covering, FAZER_EU, forRole, leaveChoice, leaveDecision, leaveFrom, leaveSection, leavesFor, leaveTask, leaveTools, newLeave, shouldSuggest, suggestNote, timesDone, withLeaves, type LeaveChoice } from './tuca-leave'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { loginsInOrder, nextLogin, noLoginLeft, primaryAccountOf, Spent, USUAL_LOGIN } from '../shared/primary-login'
-import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { ALWAYS_LOAD, missingArgs, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
@@ -42,7 +44,7 @@ import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
-import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
+import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, routinePerson, toPeopleOnly } from './people'
 import { can, isAdmin } from './policy-people'
 import { agentsFor } from './access-policy'
 import { covers, restricted, sharedAccess } from '../shared/access'
@@ -54,6 +56,7 @@ import { during, inReplyTool, traceReply, tracing, type ReplyText, type ReplyTra
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
 import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
+import type { Requester } from '../shared/doc-access'
 import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
 import { countAsk, jobTurn, MAX_CHIMES, newJob, resumeJob, stopNote, withoutGoal, type Job } from './jobs'
 import { passes } from '../shared/errors'
@@ -318,6 +321,7 @@ export interface RunnerDeps {
   emit: (e: CoreEvent) => void
   workDir: string // per-agent empty directories live here
   dataDir?: string // the app's data: images I attach are kept in its artifact store; without it, they're dropped
+  machine?: Machine // which computers an agent can ask for on a card (src/core/tuca-help.ts)
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
@@ -337,6 +341,7 @@ export interface RunnerDeps {
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   applyNow?: (messageId: string, personId: string) => void // a Tuca reply ended: what it proposed inside the app is applied for that person (Settings.tucaApplyNow); without it, everything stays a card
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'outOfReach'> // without it, agents have no wiki
+  docs?: Docs // Documentos, for the agents' document tools; without it, agents have none
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
   feedbackOn?: () => boolean // feedback to the people who make Tucano can be sent from here (core/feedback.ts); without it, the Tuca can't write one
@@ -1269,12 +1274,23 @@ export class Runner {
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
       const status = settings.engines[model.engine]
-      // The router's logins: the primary one first when one is set, then the others in order, each tried once.
-      const logins = loginsInOrder(settings, model.engine)
-      if (!status.installed || !logins.some((login) => login.ready)) return fail(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
-
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
+      // The router's model out of quota or not ready: the channel's agents' reserve models pick
+      // instead, as their replies would move to them, so a channel doesn't go quiet while a DM still answers.
+      const onReserve = async (why: string): Promise<void> => {
+        const reserves = routerReserves(members, settings, model.engine)
+        for (const alt of reserves) {
+          const rr = await during({ operation: 'router', sessionId: trigger, conversationId: conv.id }, () => route({ ...input, engine: engines[alt.engine], model: alt.id, cwd }))
+          if (rr.usage) db.addReceipt({ ...rr.usage, model: alt.id, ms: rr.ms, messageId: note.id, agentId: 'router', engine: alt.engine, at: Date.now() })
+          if (!('error' in rr)) return this.routed(conv, note, rr.agents, trigger, `${rr.reason}${fellBack} · ${L(`o ${ENGINES[model.engine].label} não pôde, decidiu o ${alt.label}`, `${ENGINES[model.engine].label} couldn't, ${alt.label} decided`)}`, parallel)
+        }
+        fail(why)
+      }
+      // The router's logins: the primary one first when one is set, then the others in order, each tried once.
+      const logins = loginsInOrder(settings, model.engine)
+      if (!status.installed || !logins.some((login) => login.ready)) return await onReserve(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+
       const tried = new Set<string>()
       let r: Awaited<ReturnType<typeof route>> | undefined
       for (let login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried }); login; login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried })) {
@@ -1286,8 +1302,8 @@ export class Runner {
         this.spent.mark(model.engine, login.id, Date.now())
       }
       const label = ENGINES[model.engine].label
-      if (!r) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
-      if ('error' in r && tried.size > 1 && outOfQuota(r.error)) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
+      if (!r) return await onReserve(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
+      if ('error' in r && outOfQuota(r.error)) return await onReserve(tried.size > 1 ? noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }) : friendly(r.error, { engine: label, doing: L('escolher quem responde', 'picking who answers') }).text)
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
       this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
@@ -1451,15 +1467,18 @@ export class Runner {
   // The agent's reserve model, when it has one that can run now: another model, on a harness that's ready.
   // The agent's reserve, when it can take the reply: its model, and the account it runs on (unset: its harness's
   // usual login). None when it's the very login and model that just ran out, or when its login isn't ready.
-  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
-    const model = agent.fallbackModelId ? modelInfo(agent.fallbackModelId) : undefined
+  private reserveFor(agent: Agent, settings: Settings, from: Account | undefined): { id: string; model: NonNullable<ReturnType<typeof modelInfo>>; account?: Account } | undefined {
+    // Its own reserve, else the workspace's (Settings › Models), which takes no account of its own.
+    const own = !!agent.fallbackModelId
+    const id = agent.fallbackModelId || settings.defaultFallbackModel
+    const model = id ? modelInfo(id) : undefined
     if (!model?.id) return undefined
     // An account of another harness (the reserve's model changed since) means the usual login, like the agent's own.
-    const account = agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
-    if (agent.fallbackModelId === agent.modelId && account?.id === from?.id) return undefined
+    const account = own && agent.fallbackAccountId ? settings.accounts?.find((a) => a.id === agent.fallbackAccountId && a.engine === model.engine) : undefined
+    if (id === agent.modelId && account?.id === from?.id) return undefined
     const status = settings.engines[model.engine]
     if (!status?.installed || (account ? !account.loggedIn : !status.loggedIn)) return undefined
-    return { model, account }
+    return { id: id!, model, account }
   }
 
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
@@ -1794,6 +1813,12 @@ export class Runner {
     }
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
+    // Documentos: for an agent that reaches at least one folder, working for this person (a routine of the team's: for no one).
+    // A DM is read by its person alone. Any other conversation is read by everyone who sees it, so its documents are only the folders all of them may see.
+    const docsAsker: Person | null = opts.routine ? (routinePerson(db, routineOf) ?? null) : requester
+    const readers = conv.kind === 'dm' ? [] : db.people().filter((p) => sees.canSeeConversation(p, conv))
+    const docsRequester: Requester = conv.kind === 'dm' ? docsAsker : readers.length ? readers : null
+    const docs = this.deps.gateway && this.deps.docs && this.deps.docs.foldersFor(agent, docsRequester, 'read').length > 0 ? this.deps.docs : undefined
 
     const control: Control = { ctl: new AbortController(), msg }
     control.flush = () => flush() // a steer's row goes in after the words streamed so far
@@ -1868,7 +1893,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, NEXT_STEPS.name, FAZER_EU.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, PEDIR_CHAVE, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, NEXT_STEPS.name, FAZER_EU.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, PEDIR_CHAVE, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DOCS_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -2028,6 +2053,7 @@ ${note}`,
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...(wiki ? WIKI_TOOLS : []),
+      ...(docs ? DOCS_TOOLS : []),
       ...(ownWeb ? WEB_TOOLS : [])
     ]
     // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
@@ -2398,7 +2424,7 @@ ${note}`,
           const r =
             name === PROPOR_TIME.name
               ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
-              : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
+              : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run), ...(this.deps.dataDir ? { folder: (path: string) => folderToLend(path, this.deps.dataDir!) } : {}), ...(this.deps.machine ? { machine: this.deps.machine } : {}) })
           if (!r.proposal) return textResult(r.error!, true)
           // Its cards as they are now: the person may have applied or discarded one meanwhile.
           msg.run = keepDecided(msg.run!, db.message(msg.id)?.run)
@@ -2428,16 +2454,16 @@ ${note}`,
           const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
           addSteps({ id: randomUUID(), label: what, detail, status: 'done' })
           const needs = p.needs?.length ? L(` Ela depende de ${p.needs.join(', ')}, proposto antes nesta resposta: o app cria primeiro.`, ` It depends on ${p.needs.join(', ')}, proposed earlier in this reply: the app makes that first.`) : ''
-          const access = p.kind === 'team' ? p.agents.some((a) => Object.keys(a.grants).length) : p.kind === 'agent' && (p.changes.grants !== undefined || p.changes.limit !== undefined)
+          const access = p.kind === 'team' ? p.agents.some((a) => Object.keys(a.grants).length) : p.kind === 'agent' && Object.keys(p.changes).some(isAccessChange)
           // Applied when the reply ends, as applyNow will: agents are the admins', and a change only to
           // what grants access (connectors, the month's limit) always waits on its card.
-          const onlyAccess = p.kind === 'agent' && Object.keys(p.changes).every((k) => k === 'grants' || k === 'limit')
+          const onlyAccess = p.kind === 'agent' && onlyAccessChanges(p.changes)
           const auto = helps && !!this.deps.applyNow && appliesNow(now) && !onlyAccess && (isAdmin(requester) || (p.kind !== 'agent' && p.kind !== 'team'))
           return textResult(
             auto
               ? L(
-                  `Anotado: o app aplica assim que esta resposta terminar, e o card vira um recibo com Desfazer.${needs}${access ? ' Os conectores e o limite do mês ficam num card à parte, esperando a pessoa confirmar.' : ''} Se o pedido tem mais mudanças, proponha as outras agora, nesta mesma resposta: uma chamada por mudança. No fim, uma frase curta dizendo o que você fez (e que dá pra desfazer no card), sem perguntar se pode e sem repetir o que os cards mostram.`,
-                  `Noted: the app applies it as soon as this reply ends, and the card becomes a receipt with Undo.${needs}${access ? ' Connectors and the monthly limit go on a separate card, waiting for the person to confirm.' : ''} If the request has more changes, propose the others now, in this same reply: one call per change. At the end, one short sentence saying what you did (and that it can be undone on the card), without asking whether you may and without repeating what the cards show.`
+                  `Anotado: o app aplica assim que esta resposta terminar, e o card vira um recibo com Desfazer.${needs}${access ? ' O acesso (conectores, limite do mês, computador, navegador, pastas) fica num card à parte, esperando a pessoa confirmar.' : ''} Se o pedido tem mais mudanças, proponha as outras agora, nesta mesma resposta: uma chamada por mudança. No fim, uma frase curta dizendo o que você fez (e que dá pra desfazer no card), sem perguntar se pode e sem repetir o que os cards mostram.`,
+                  `Noted: the app applies it as soon as this reply ends, and the card becomes a receipt with Undo.${needs}${access ? ' Access (connectors, the monthly limit, computer, browser, folders) goes on a separate card, waiting for the person to confirm.' : ''} If the request has more changes, propose the others now, in this same reply: one call per change. At the end, one short sentence saying what you did (and that it can be undone on the card), without asking whether you may and without repeating what the cards show.`
                 )
               : L(
                   `A proposta está no card, com Aplicar e Descartar, e ainda NÃO aconteceu: só acontece quando a pessoa aplicar.${needs} Se o pedido tem mais mudanças, proponha as outras agora, nesta mesma resposta: cada uma vira um card no mesmo grupo, com "Aplicar todos". No fim, uma frase curta dizendo que é só aplicar (ou pedir um ajuste), sem repetir o que os cards mostram.`,
@@ -2586,6 +2612,65 @@ ${note}`,
           if (!current) return textResult(L('Você não tem acesso à wiki agora.', 'You do not have wiki access now.'), true)
           const r = wikiCall(current, name, args)
           addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
+          return textResult(r.text, r.error)
+        }
+
+        if (docs && DOCS_TOOL_NAMES.has(name)) {
+          // Access is read again from the current data at every call: a long reply must not keep what changed.
+          const current = db.agent(agent.id)
+          if (!current || current.archived) return textResult(L('Você não tem acesso a Documentos agora.', 'You do not have access to Documents now.'), true)
+          const attach = (a: Artifact): void => {
+            if (!artifactIds.includes(a.id)) artifactIds.push(a.id)
+            msg.run = { ...msg.run!, artifactIds: [...artifactIds] }
+            save()
+          }
+          const r = await docsCall(
+            {
+              docs,
+              agent: current,
+              requester: docsRequester,
+              askedBy: docsAsker?.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              routineId: routineOf?.id,
+              threadId: msg.threadId,
+              dataDir: this.deps.dataDir ?? '',
+              shown: (id) => {
+                const a = db.artifact(id)
+                return a && a.conversationId === conv.id ? a : undefined
+              },
+              fromComputer:
+                computers && current.computer
+                  ? async (path, title) => {
+                      const out = await computers.call(current, 'show_file', { path, title }, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+                      if (!out.artifact) return { error: resultText(out.result) || L('Não consegui ler esse arquivo no seu computador.', "I couldn't read that file on your computer.") }
+                      attach(out.artifact)
+                      return { artifact: out.artifact }
+                    }
+                  : undefined,
+              ...(this.deps.vault ? { mask: (text: string) => this.deps.vault!.mask(agent.id, text) } : {}),
+              fromText: (fileName, data, title) => {
+                const dataDir = this.deps.dataDir
+                if (!dataDir) return undefined
+                try {
+                  const id = randomUUID()
+                  const safe = fileName.replace(/[\\/]/g, '_')
+                  mkdirSync(join(dataDir, 'artifacts', id), { recursive: true })
+                  writeFileSync(join(dataDir, 'artifacts', id, safe), data)
+                  const artifact: Artifact = { id, agentId: agent.id, conversationId: conv.id, messageId: msg.id, kind: artifactKind(safe), name: safe, title, source: 'docs_guardar', size: data.length, createdAt: Date.now() }
+                  db.saveArtifact(artifact)
+                  this.deps.emit({ type: 'artifact', artifact })
+                  attach(artifact)
+                  return artifact
+                } catch {
+                  return undefined
+                }
+              }
+            },
+            name,
+            args
+          )
+          addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.text } : {}) })
           return textResult(r.text, r.error)
         }
 
@@ -3015,7 +3100,9 @@ ${note}`,
         // something from outside too (never a high-risk one).
         // A runner's call, only when every inner tool that would ask is allowed for good on its own.
         const rules = db.agent(agent.id)?.autoApprove ?? []
-        const always = cls !== 'read' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
+        // A node's command is never allowed for good as a tool, as this computer's terminal isn't: "always" on a
+        // command turns its kind of action to "does it alone"; a node_bash rule saved before (0.2.36) is ignored.
+        const always = cls !== 'read' && !current.highRisk && !(isNode && current.name === NODE_BASH) && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
         // A runner's call counts as the actions it runs; one that can't be placed (raw requests, code) asks at every level.
         const inner = perCall ? innerActions(current.name, callArgs) : undefined
         // A risky click or key on a node (a person's computer reached from this server) is judged as one in
@@ -3173,6 +3260,15 @@ ${note}`,
             true
           )
         }
+        // Without what the tool requires: said with its parameters, counted as a failed call (the brake
+        // still stops a model that keeps guessing), and nothing runs. See missingArgs.
+        const def = toolDefs.find((t) => t.name === name)
+        const lacking = def ? missingArgs(def, args) : undefined
+        if (lacking) {
+          addSteps({ id: randomUUID(), label: L('Chamada sem parâmetro', 'Call missing a parameter'), detail: name, status: 'error', tool: name, error: resultText(lacking).split('\n')[0] })
+          if (++failing >= ERRORS_STOP) halt('errors')
+          return lacking
+        }
         inFlight++
         acted = true
         sign()
@@ -3243,6 +3339,8 @@ ${note}`,
       routines: routines?.forAgent(agent.id).filter((r) => visible(r.conversationId)),
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
+      docs: docs?.foldersFor(agent, docsRequester, 'read').map((f) => ({ path: f.path, rule: f.rule })),
+      docsRoutine: !!routineOf,
       connectors: exposed.size > 0,
       github,
       people,
@@ -3396,7 +3494,7 @@ ${note}`,
         plan = undefined
         input = whole
         onReserve = true
-        modelId = agent.fallbackModelId!
+        modelId = reserve.id
         modelName = reserve.model.id
         engineId = reserve.model.engine
         replyTrace?.movedTo(engineId, modelName)
@@ -3632,11 +3730,14 @@ ${note}`,
     const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
     // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
     const kinds: ActionKind[] = ap.connectorId === COMPUTADOR || ap.tool === NODE_BASH ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
+    // A node's command, like this computer's: only its kind of action, never node_bash itself (an `ls` allowed
+    // for good would let every command after it past its class and the outside-content guard).
+    const nodeCommand = ap.tool === NODE_BASH && db.tools(ap.connectorId).some((t) => t.name === NODE_BASH)
     if (always && decision === 'approved' && owner && !ap.highRisk && kinds.length) {
       db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
-    } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR) {
+    } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR && !nodeCommand) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), ...fresh] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: fresh.map((r) => r.slice(r.indexOf(':') + 1)).join(', ') } })
@@ -4763,4 +4864,22 @@ ${note}`,
       this.checkIdle()
     }
   }
+}
+
+// Models that may pick who answers in a channel when the router's own can't: the reserve
+// models of the channel's agents (the workspace's default reserve for one without its own), then
+// their main ones, on another harness that's signed in.
+export function routerReserves(members: Agent[], settings: Pick<Settings, 'engines' | 'defaultFallbackModel'>, out: EngineId): NonNullable<ReturnType<typeof modelInfo>>[] {
+  const ids = [...members.map((a) => a.fallbackModelId || settings.defaultFallbackModel), ...members.map((a) => a.modelId)].filter((id): id is string => !!id)
+  const seen = new Set<string>()
+  const list: NonNullable<ReturnType<typeof modelInfo>>[] = []
+  for (const id of ids) {
+    const m = usable(modelInfo(id))
+    if (!m || m.engine === out || seen.has(m.id)) continue
+    const st = settings.engines[m.engine]
+    if (!st?.installed || !st.loggedIn) continue
+    seen.add(m.id)
+    list.push(m)
+  }
+  return list.slice(0, 2)
 }

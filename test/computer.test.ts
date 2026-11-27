@@ -5,7 +5,7 @@ import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
-import { artifactKind, checkFolder, clipOutput, Computers, containerPath, folderName, formatExec, hostUrl, lentProblem, lentWhereTheyAre, listening, mountArgs } from '../src/core/computer'
+import { artifactKind, checkFolder, clipOutput, Computers, containerPath, folderName, formatExec, HARDENING, hostUrl, lentProblem, lentWhereTheyAre, listening, mountArgs } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
@@ -134,6 +134,12 @@ describe('lent folders', () => {
     expect(mountArgs('c', [{ name: 'py', path: '/m/py', readOnly: false }], has)).toContain('c-py-venv:/projetos/py/.venv')
     expect(mountArgs('c', [{ name: 'ro', path: '/m/ro', readOnly: true }], has)).toEqual(['-v', '/m/ro:/projetos/ro:ro'])
   })
+
+  it('limits every computer without taking from root what apt and lent folders need', () => {
+    expect(HARDENING).toContain('no-new-privileges')
+    expect(HARDENING).toContain('--pids-limit')
+    for (const cap of ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID', 'ALL']) expect(HARDENING).not.toContain(cap)
+  })
 })
 
 // The rest needs Docker running and the base image; skipped otherwise.
@@ -185,6 +191,14 @@ describe.skipIf(!hasDocker)('computer (Docker)', () => {
     const a = db.artifacts().find((x) => x.id === id)!
     return readFileSync(join(dataDir, 'artifacts', a.id, a.name), 'utf8')
   }
+
+  it('makes the computer with its limits, and root still installs packages', async () => {
+    const config = JSON.parse(execFileSync('docker', ['inspect', '-f', '{{json .HostConfig}}', computers.name(lia.id)], { encoding: 'utf8' })) as { SecurityOpt: string[]; PidsLimit: number; CapDrop: string[] }
+    expect(config.SecurityOpt).toContain('no-new-privileges')
+    expect(config.PidsLimit).toBe(2048)
+    expect(config.CapDrop.map((c) => c.replace(/^CAP_/, '')).sort()).toEqual(['AUDIT_WRITE', 'MKNOD', 'NET_RAW'])
+    expect((await run('bash', { command: 'apt-get update -qq && apt-get install -y -qq jq >/dev/null && jq --version' })).text).toMatch(/jq-1\./)
+  }, 180_000)
 
   it('runs commands as root in a Linux box', async () => {
     const r = await run('bash', { command: 'uname -s && whoami && pwd && node --version && python3 --version' })

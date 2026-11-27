@@ -428,7 +428,7 @@ describe('the sidebar and the missions', () => {
       expect(labels()).toEqual(expect.arrayContaining(['Conhecimento', 'Operação']))
       expect(document.querySelector('.sidebar__tool--connectors')?.textContent).toBe('Conectores')
       await render(<Hub tab="memory">{null}</Hub>)
-      expect(tabs()).toEqual(['Memória', 'Wiki', 'Skills'])
+      expect(tabs()).toEqual(['Memória', 'Wiki', 'Skills', 'Documentos'])
       await render(<Hub tab="usage">{null}</Hub>)
       expect(tabs()).toEqual(['Rotinas', 'Boletim', 'Uso e limites'])
     }

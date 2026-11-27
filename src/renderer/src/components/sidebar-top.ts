@@ -6,7 +6,7 @@
 // on the person in them (an approval; a memory suggested, a skill proposed).
 // The channels, the agents and the foot (Conectores, Configurações) always stay.
 import { L } from '../../../shared/lang'
-import { getState, inboxCount, isTeam, pendingApprovals, teamMode, toast, updateSettings, useStore } from '../store'
+import { docsWaitingCount, getState, inboxCount, isTeam, pendingApprovals, teamMode, toast, updateSettings, useStore } from '../store'
 import { useHubTabs } from './Hubs'
 import { useSidebarParts } from './Missions'
 
@@ -53,7 +53,7 @@ export function setHidden(item: TopItem, hide: boolean, quiet = false): void {
 // What waits on the person in an item that may come back by itself: Aprovações' approvals (Pra você's
 // whole inbox, with people), Conhecimento's suggested memories and proposed skills.
 export function useWaitingIn(): Partial<Record<TopItem, number>> {
-  const approvals = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
+  const approvals = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length + docsWaitingCount(s)))
   const knowledge = useHubTabs('knowledge').reduce((n, t) => n + t.badge, 0)
   return { approvals, knowledge }
 }

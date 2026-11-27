@@ -12,7 +12,7 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, sta
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer, type Server } from 'node:https'
 import { homedir } from 'node:os'
-import { extname, join, normalize, sep } from 'node:path'
+import { extname, join, normalize, resolve, sep } from 'node:path'
 import { ARTIFACT_CSP, BASE_HEADERS, decodedPath, Doors } from '../server/guard'
 import { deviceLabel, PairCodes } from '../server/pair-codes'
 import { pairingLink } from '../shared/servers'
@@ -28,7 +28,9 @@ export interface HomeCore {
   // the key the phone signed in with, so the core can end this line when that device is disconnected
   // (Settings › Celular › Seu iPhone); then onClose.
   open(person: string, onMessage: (msg: unknown) => void, o?: { device?: string; onClose?: () => void }): { post(data: unknown): void; close(): void }
-  // Where the workspace keeps what agents showed (artifacts/<id>/<name>).
+  // Where a document of Documentos is, when this person may see it (`v`: an older version); undefined for a refusal and a missing file alike.
+  docFile(person: string, doc: string, v?: number): Promise<{ path: string; kind: string } | undefined>
+  // Where the workspace keeps what agents showed (artifacts/<id>/<name>) and the documents (documents/).
   dataDir(): string
 }
 
@@ -46,6 +48,7 @@ export function isLocalAddress(raw: string | undefined): boolean {
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json',
@@ -247,6 +250,21 @@ export class HomeLink {
       if (!path.startsWith(dir + sep) || !existsSync(path) || !statSync(path).isFile()) return void res.writeHead(404, BASE_HEADERS).end()
       res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream', 'content-security-policy': ARTIFACT_CSP })
       return void createReadStream(path).on('error', () => res.destroy()).pipe(res)
+    }
+
+    // A document (Documentos): the core says where its file is for THIS person (the key's), as the server does for a browser.
+    const doc = /^\/doc\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
+    if (doc && req.method === 'GET') {
+      const v = Number(url.searchParams.get('v')) || undefined
+      void core.docFile(who.id, doc[1]!, v).then(
+        (found) => {
+          if (!found || !normalize(found.path).startsWith(resolve(join(core.dataDir(), 'documents')) + sep)) return void res.writeHead(404, BASE_HEADERS).end()
+          res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES[extname(found.path).toLowerCase()] ?? 'application/octet-stream', 'content-security-policy': ARTIFACT_CSP, 'cache-control': 'private, no-store' })
+          createReadStream(found.path).on('error', () => res.destroy()).pipe(res)
+        },
+        () => res.writeHead(404, BASE_HEADERS).end()
+      )
+      return
     }
 
     // A file from the phone for a message: ~/Enviados, under its own name (a number added when taken).

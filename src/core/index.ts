@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type LentFolder, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, routineCap, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -65,6 +65,9 @@ import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
+import { Docs } from './docs'
+import { DocsBrain } from './docs-brain'
+import { mayApprove } from '../shared/doc-access'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
 import { applyForeignTeam, readForeignZip } from './agent-import'
@@ -664,7 +667,7 @@ const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error)
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown; doc?: unknown; v?: unknown } | undefined
   if (r?.type === 'flush-traces') return void flushTelemetry()
   if (r?.type === 'workspace-pause') {
     try {
@@ -753,6 +756,13 @@ process.parentPort.on('message', (e) => {
     const svc = typeof r.port === 'number' ? db.agents().flatMap((x) => computers.info(x).services).find((x) => x.url && Number(new URL(x.url).port) === r.port) : undefined
     const ok = !!who && (a ? people.canSeeFrom(who, a.conversationId) : svc ? people.canSeeFrom(who, svc.conversationId) : false)
     return process.parentPort.postMessage({ type: 'access-result', id: r.id, ok })
+  }
+  // A file of Documentos for a server's page or the desktop's window: where it is, when this person may see it
+  // (the desktop sends no person: the owner). Null for anything else, so a refusal and a missing file look the same.
+  if (r?.type === 'doc-file') {
+    const who = typeof r.person === 'string' ? db.person(r.person) : db.owner()
+    const file = who && typeof r.doc === 'string' ? docs.fileOf(who, r.doc, typeof r.v === 'number' ? r.v : undefined) : null
+    return process.parentPort.postMessage({ type: 'doc-file-result', id: r.id, data: file })
   }
   // A server's invite page: the name of whom a restoring invite brings back, to fill in.
   if (r?.type === 'invite-info') {
@@ -907,8 +917,10 @@ const chrome =
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
 const transcriber = new Transcriber()
-// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads.
-const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(dataDir, 'voice') }
+// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads. That
+// folder is the desktop's, for every workspace, so a new workspace doesn't download hundreds of MB again; a model a
+// workspace downloaded into its own folder before is still found there.
+const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(installDir, 'voice'), own: join(dataDir, 'voice') }
 const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)))
 const dictation = async () => {
   const s = voiceStatus(settings().voice, await loginEnv(), undefined, voicePlaces)
@@ -967,7 +979,10 @@ const connectors = new ConnectorManager({
   // A provider that takes only a loopback address back (Canva's): on that server, the address the person pastes.
   localCallbackUrl: () => gateway.url('/oauth/callback'),
   // Slack's app registers its address once: the workspace's webhook port, which doesn't change.
-  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`)
+  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`),
+  // The Microsoft connector's server, inside Tucano: its sign-in under the data folder, run by the app itself.
+  builtinRoot: join(dataDir, 'connectors'),
+  runtime: process.env['TUCANO_RUNTIME'] || process.execPath
 })
 const oauthCallback = async (url: URL): Promise<string> => {
   const code = url.searchParams.get('code')
@@ -1078,6 +1093,30 @@ const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChang
 // The folder is read behind the window: a big Obsidian vault takes a while.
 wiki.init(true, true)
 toMain({ type: 'wiki_dir', path: wiki.dir })
+// Documentos: files in folders that say who sees them (core/docs.ts). The folder is the truth, docs.db its index.
+const docs = new Docs({
+  dir: join(dataDir, 'documents'),
+  indexPath: join(dataDir, 'docs.db'),
+  artifactsDir: join(dataDir, 'artifacts'),
+  agents: () => db.agents(),
+  people: () => db.people(),
+  artifact: (id) => db.artifact(id),
+  canSeeArtifact: (person, a) => people.canSeeConversation(person, db.conversation(a.conversationId)) && people.artifactVisible(person, a),
+  // What waits for approval, and the dates found, are in each person's inbox: it is told whenever documents change.
+  emit: () => {
+    emit({ type: 'docs' })
+    emit({ type: 'inbox' })
+  },
+  // A document began waiting for approval: the people who may approve it get the knock (to: only them).
+  onReview: (doc, folder) => {
+    const folders = docs.index.folders()
+    const to = db.people().filter((p) => mayApprove(p, folders, doc.folderId)).map((p) => p.id)
+    if (!to.length) return
+    notifyAll(L('Documento esperando aprovação', 'A document is waiting for approval'), L(`"${doc.name}" em ${folder.name} espera a sua aprovação.`, `"${doc.name}" in ${folder.name} is waiting for your approval.`), undefined, undefined, { kind: 'approval', to })
+  }
+})
+docs.init() // the folder is read behind: `docs.loaded`
+people.docsInbox = (person) => ({ documents: docs.waitingFor(person), docDates: docs.datesFor(person) })
 // What never goes to the wiki's repository: the pages held for someone, the sources that came from a
 // DM (or may have: a conversation gone), and Tucano's own index and log, which name every page.
 const gitPrivate = (): Set<string> => {
@@ -1168,26 +1207,68 @@ function mergeWiki(from: { root: string; dir: string; held: { key: string; perso
   wiki.scan()
   return { copied, copies }
 }
-// The curator reads the conversations with the memory's cheap model, and keeps what lasts.
-const wikiLlm = async (system: string, prompt: string): Promise<string> => {
+// The cheap background model, for the wiki's curator and Documentos' cataloguer (`tag`: which one, for the receipts).
+const backgroundModel = (): ReturnType<typeof modelInfo> => usable(modelInfo(settings().memoryModel)) ?? modelInfo('haiku')
+const backgroundReady = (): boolean => {
+  const model = backgroundModel()
+  const st = model && settings().engines[model.engine]
+  return !!st && st.installed && st.loggedIn
+}
+const backgroundLlm = async (system: string, prompt: string, tag: 'wiki' | 'docs', timeoutMs = 180_000): Promise<string> => {
   await enginesReady
-  const s = settings()
-  const model = usable(modelInfo(s.memoryModel)) ?? modelInfo('haiku')!
-  const st = s.engines[model.engine]
-  if (!st.installed || !st.loggedIn) throw new Error(L(`O ${ENGINES[model.engine].label} não está pronto pra organizar a wiki.`, `${ENGINES[model.engine].label} isn't ready to organize the wiki.`))
-  const cwd = join(dataDir, 'agents', '_wiki')
+  const model = backgroundModel()!
+  const st = settings().engines[model.engine]
+  const label = ENGINES[model.engine].label
+  if (!st.installed || !st.loggedIn) throw new Error(tag === 'wiki' ? L(`O ${label} não está pronto pra organizar a wiki.`, `${label} isn't ready to organize the wiki.`) : L(`O ${label} não está pronto. Conecte um modelo nas Configurações.`, `${label} isn't ready. Connect a model in Settings.`))
+  const cwd = join(dataDir, 'agents', `_${tag}`)
   mkdirSync(cwd, { recursive: true })
   const started = Date.now()
   let text = ''
-  for await (const ev of wikiEngines[model.engine].run({ model: model.id, effort: 'low', system, prompt, cwd, signal: AbortSignal.timeout(180_000) })) {
+  for await (const ev of wikiEngines[model.engine].run({ model: model.id, effort: 'low', system, prompt, cwd, signal: AbortSignal.timeout(timeoutMs) })) {
     if (ev.type === 'text') text += ev.delta
     else if (ev.type === 'done') {
       text = ev.text || text
-      db.addReceipt({ ...ev.usage, model: model.id, ms: Date.now() - started, messageId: 'wiki', agentId: 'wiki', engine: model.engine, at: Date.now() })
+      db.addReceipt({ ...ev.usage, model: model.id, ms: Date.now() - started, messageId: tag, agentId: tag, engine: model.engine, at: Date.now() })
     } else if (ev.type === 'error') throw new Error(ev.message)
   }
   return text
 }
+const wikiLlm = (system: string, prompt: string): Promise<string> => backgroundLlm(system, prompt, 'wiki')
+// Documentos' cataloguer: summaries, dates, and putting away what people drop in their inbox (core/docs-brain.ts).
+const docsBrain = new DocsBrain({
+  docs,
+  llm: (system, prompt, timeoutMs) => backgroundLlm(system, prompt, 'docs', timeoutMs),
+  ready: backgroundReady,
+  tucaId: () => db.agents().find((a) => a.kind === 'tuca')?.id,
+  notify: (personId, title, text) => notifyAll(title, text, undefined, undefined, { to: [personId] }),
+  routines,
+  // The same limit `agendar_rotina` keeps (Routines.schedule): the agent's own, counting the routines it has on.
+  routineRoom: (agentId) => {
+    const agent = db.agent(agentId)
+    return !!agent && routines.forAgent(agentId).length < routineCap(agent.maxRoutines)
+  },
+  dmWith: (personId, agentId) => {
+    const person = db.people().find((p) => p.id === personId)
+    if (!person) return undefined
+    try {
+      assertAgentVisible(db, person, agentId)
+    } catch {
+      return undefined
+    }
+    const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === personId)
+    if (existing) return existing.id
+    const id = randomUUID()
+    db.createConversation({ id, kind: 'dm', name: agentId, members: [agentId], owner: personId })
+    emitConversations([id])
+    return id
+  },
+  agents: () => db.agents()
+})
+// Files found on disk by the scan are not queued here: they are catalogued a few at a time at the next start (brain.start).
+docs.deps.onSaved = (doc, why) => {
+  if (why !== 'outside') docsBrain.enqueue(doc.id)
+}
+bg(docs.loaded.then(() => docsBrain.start()), 'docsBrain')
 // A curation from someone's DM may read the pages held for them; any other, none that's held.
 const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined), beforeWrite: () => gitSync.pull() })
 // The review: by hand, or once a week when asked (checked every hour).
@@ -1204,6 +1285,8 @@ const runner = new Runner({
   emit,
   workDir: join(dataDir, 'agents'),
   dataDir,
+  // What an agent can ask for on a card: an isolated Linux only where Docker is (never inside a server's container).
+  machine: { linux: !serverMode || onPath('docker'), here: serverMode ? 'server' : osOf() === 'mac' ? 'mac' : 'computer' },
   gateway,
   connectors,
   memory,
@@ -1220,6 +1303,7 @@ const runner = new Runner({
   routines,
   skills,
   wiki,
+  docs,
   wikiCurator: curator,
   models: () => availableModels(settings(), allListed()),
   applyNow: (messageId, personId) => applyNow(messageId, personId),
@@ -1366,6 +1450,25 @@ function returnChannelFolders(): void {
     const kept = folders.filter((f) => !('channelId' in f))
     if (kept.length < folders.length) setFolders(agent, kept)
   }
+}
+
+// A card's change to an agent. Folders don't go through saveAgent (it never stores them):
+// they are set apart, and a folder newly lent is checked again as lendFolder checks it, since the card
+// may have waited. `check`: false when undoing, which puts back folders that were lent before.
+function applyAgentChanges(agent: Agent, changes: AgentChanges, channelIds: string[], ctx: Ctx, check: boolean): void {
+  const { folders, ...rest } = changes
+  let lent: LentFolder[] | undefined
+  if (folders !== undefined) {
+    const had = new Set((agent.folders ?? []).map((f) => f.path))
+    lent = (folders ?? []).map((f) => {
+      if (!check || had.has(f.path)) return f
+      const why = checkFolder(f.path, { dataDir, named: true })
+      if (why) throw new UserError(why)
+      return { ...f, path: realpathSync(f.path) }
+    })
+  }
+  if (Object.keys(rest).length) api.saveAgent({ agent: { ...agent, ...rest }, channelIds }, ctx)
+  if (lent) setFolders(db.agent(agent.id) ?? agent, lent)
 }
 
 function setFolders(agent: Agent, folders: NonNullable<Agent['folders']>): void {
@@ -1613,7 +1716,7 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false, aut
     if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
     const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
     const prior = Object.fromEntries(Object.keys(p.changes).map((k) => [k, agent[k as keyof AgentChanges]])) as AgentChanges
-    api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
+    applyAgentChanges(agent, p.changes, channelIds, ctx, true)
     id = agent.id
     extra.undo = { until, prior }
   } else if (p.kind === 'routine') {
@@ -1838,7 +1941,7 @@ function undoOne(ctx: Ctx, messageId: string, index: number): void {
       const moved = changedSince(agent, p.changes)
       if (moved.length) throw new Error(undoErrors.changed(agent.name, moved))
       const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
-      api.saveAgent({ agent: { ...agent, ...p.undo.prior }, channelIds }, ctx)
+      applyAgentChanges(agent, p.undo.prior ?? {}, channelIds, ctx, false)
     }
   } else if (p.kind === 'team') unmake(ctx, messageId, p.agentIds ?? [], p.undo.stamps ?? {}, p.channel ? p.appliedId : undefined)
   else {
@@ -1978,6 +2081,7 @@ function purged(all: Purged[]): void {
     }
     for (const r of p.routines) emit({ type: 'routine_removed', id: r.id, for: p.person })
     for (const a of p.artifacts) rmSync(join(dataDir, 'artifacts', a.id), { recursive: true, force: true })
+    docs.purgePerson(p.person) // their personal folder goes for good, and their name leaves every folder's access
     for (const src of wiki.sources(100_000)) if (src.origin?.conversationId && p.dms.includes(src.origin.conversationId)) wiki.removeSource(src.id)
   }
   if (all.some((p) => p.dms.length)) {
@@ -2030,6 +2134,10 @@ const titleUnavailable = (title: string): string => L(`Não dá pra usar o títu
 // How the wiki's history names someone: the owner by the workspace's name, as before.
 const nameOf = (ctx: Ctx): string => (ctx.person.role === 'owner' ? settings().workspaceName : ctx.person.name) || L('Você', 'You')
 const emitPeople = (): void => emit({ type: 'people', people: db.people(), former: db.formerPeople() })
+
+// Documentos errors reach the person as a plain sentence, never a disk path (Docs.cleanError).
+const viaDocs = <T>(run: () => T): T => { try { return run() } catch (e) { throw new Error(docs.cleanError(e)) } }
+const viaDocsAsync = async <T>(run: () => Promise<T>): Promise<T> => { try { return await run() } catch (e) { throw new Error(docs.cleanError(e)) } }
 
 const api: Handlers = {
   markRead: ({ conversationId }, ctx) => {
@@ -2547,7 +2655,7 @@ const api: Handlers = {
     const day = new Date().toISOString().slice(0, 10)
     let out = join(dir, `Tucano-backup-${day}.zip`)
     for (let n = 2; existsSync(out); n++) out = join(dir, `Tucano-backup-${day} (${n}).zip`)
-    const summary = writeBackup({ db, dataDir, wikiDir: wiki.dir, wikiIndex: wikiIndex(wiki.dir), out, app: appVersion })
+    const summary = writeBackup({ db, dataDir, wikiDir: wiki.dir, wikiIndex: wikiIndex(wiki.dir), docsDir: docs.root, docsIndex: join(dataDir, 'docs.db'), out, app: appVersion })
     toMain({ type: 'open_local', path: out, how: 'reveal' })
     return { path: out, ...summary }
   },
@@ -2742,7 +2850,10 @@ const api: Handlers = {
     bg(modelDownload.start(model), 'voiceDownload')
   },
   voiceCancelDownload: () => modelDownload.cancel(),
-  voiceRemoveModel: ({ model }) => modelDownload.remove(model),
+  voiceRemoveModel: ({ model }) => {
+    modelDownload.remove(model)
+    if (voicePlaces.own !== voicePlaces.models) rmSync(join(voicePlaces.own, VOICE_MODELS[model].file), { force: true }) // and an older copy of this workspace's
+  },
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
   updateSettings: ({ patch: { jevKey: _computed, classifierKeys: _computedKeys, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
@@ -2801,6 +2912,7 @@ const api: Handlers = {
     bg(connectors.connect(id), 'reconnectConnector')
   },
   setConnectorToken: ({ id, token }) => connectors.setToken(id, token),
+  setConnectorIcon: ({ id, icon }) => connectors.setIcon(id, icon),
   // The store for a screen without the catalog's file (the iPhone app): its entries as data, in the
   // person's language; a connector added by its entry and the values asked, filled in here.
   connectorCatalog: () => ({ categories: CATEGORIES(), entries: catalogView(), added: connectors.list().map((c) => entryOf(c)?.id).filter((id): id is string => !!id) }),
@@ -3128,6 +3240,74 @@ const api: Handlers = {
     bg(curator.ingest(src.id), 'wikiIngest')
     return src
   },
+  // Documentos: each call goes on with the person asking; who may do what is the folder's own access (core/docs.ts).
+  docs: (_p, ctx) => viaDocs(() => docs.tree(ctx.person)),
+  docFolderSave: (p, ctx) => {
+    // Who sees a folder decides who sees everything in it: a change of that goes to the team's log.
+    const before = p.id ? docs.folderAccess(p.id) : undefined
+    const saved = viaDocs(() => docs.saveFolder(ctx.person, p))
+    if (p.id && !saved.privateTo && JSON.stringify(before ?? null) !== JSON.stringify(saved.access ?? null)) record(ctx, 'document.folder_access', saved.id, { name: docs.folderName(saved.id) })
+    return saved
+  },
+  docFolderRemove: ({ id }, ctx) => viaDocs(() => docs.removeFolder(ctx.person, id)),
+  docAdd: ({ folderId, name, data, summary }, ctx) => viaDocsAsync(() => docs.add(ctx.person, { folderId, name, data: Buffer.from(data, 'base64'), ...(summary ? { summary } : {}) })),
+  docSaveArtifact: ({ artifactId, folderId }, ctx) => viaDocsAsync(() => docs.saveFromArtifact(ctx.person, artifactId, folderId)),
+  docMove: ({ id, folderId, name }, ctx) => {
+    // Out of the team's folders into a personal one: from there on only its person reads its history,
+    // so the team's log keeps that it went, and from where.
+    const before = docs.peek(id)
+    const moved = viaDocs(() => docs.move(ctx.person, id, folderId, name))
+    const taken = before ? docs.takenToPersonal(before, moved) : null
+    if (taken) record(ctx, 'document.to_personal', id, taken)
+    return moved
+  },
+  docRename: ({ id, name }, ctx) => viaDocs(() => docs.rename(ctx.person, id, name)),
+  docTrash: ({ id }, ctx) => viaDocs(() => docs.trash(ctx.person, id)),
+  docRestore: ({ id }, ctx) => viaDocs(() => docs.restore(ctx.person, id)),
+  docPurge: ({ id }, ctx) => {
+    // Nothing is left of it to tell what happened: the team's log keeps who deleted what, and from where.
+    const gone = viaDocs(() => docs.purge(ctx.person, id))
+    if (gone) record(ctx, 'document.deleted', id, gone)
+  },
+  docText: ({ id, version }, ctx) => viaDocsAsync(() => docs.text(ctx.person, id, version)),
+  docHistory: ({ id }, ctx) => viaDocs(() => docs.history(ctx.person, id)),
+  docRestoreVersion: ({ id, n }, ctx) => viaDocsAsync(() => docs.restoreVersion(ctx.person, id, n)),
+  // The same road as a file dropped on the wiki (wikiAddFile), from where the file already is: no second upload.
+  docToWiki: async ({ id }, ctx) => {
+    const { name, data } = viaDocs(() => docs.forWiki(ctx.person, id))
+    const text = await extractFile(name, data)
+    const src = wiki.addSource({ title: cleanTitle(name) || name, text, kind: 'file', file: { name, data }, by: ctx.person.id, status: 'reading' })
+    bg(curator.ingest(src.id), 'wikiIngest')
+    docs.sentToWiki(ctx.person, id)
+    return src
+  },
+  docSearch: ({ q, folderId }, ctx) => viaDocs(() => docs.search(ctx.person, q, folderId)),
+  docByArtifact: (_p, ctx) => viaDocs(() => docs.docByArtifact(ctx.person)),
+  docDecide: async ({ id, ok, note, version }, ctx) => {
+    const r = viaDocs(() => docs.decide(ctx.person, id, ok, note, version))
+    // The agent that made it hears what to change, in its conversation; only when this person can reach that conversation. Never fails the decision.
+    if (r.tell) {
+      try {
+        reach(ctx, r.tell.conversationId)
+        bg(runner.send(r.tell.conversationId, r.tell.text, [], r.tell.threadId, ctx.person.id), 'docDecide')
+      } catch (e) {
+        console.warn('[docs] could not tell the agent', e)
+      }
+    }
+    return r.doc
+  },
+  docMakeOfficial: ({ id }, ctx) => viaDocs(() => docs.makeOfficial(ctx.person, id)),
+  docInboxAdd: ({ name, data }, ctx) => viaDocsAsync(() => docs.addInbox(ctx.person, { name, data: Buffer.from(data, 'base64') })),
+  docUnfile: ({ id }, ctx) => viaDocs(() => docs.unfile(ctx.person, id)),
+  docDateDismiss: ({ id }, ctx) => viaDocs(() => docs.dismissDate(ctx.person, id)),
+  docRemind: ({ id }, ctx) =>
+    viaDocsAsync(async () => {
+      const made = docsBrain.remind(ctx.person, id)
+      const routine = db.routine(made.routineId)
+      if (routine) record(ctx, 'routine.created', routine.id, routineDetail(db, routine))
+      return made
+    }),
+  docAsk: ({ q, folderId, docId }, ctx) => viaDocsAsync(() => docsBrain.ask(ctx.person, q, { ...(folderId ? { folderId } : {}), ...(docId ? { docId } : {}) })),
   wikiAddNote: ({ text, title }, ctx) => {
     if (title && /\u0000/.test(title)) throw new Error(L('Esse título tem caracteres que não valem.', 'That title has characters that are not allowed.'))
     const first = cleanTitle(text.trim().split('\n')[0]!.replace(/^#+\s*/, '')).slice(0, 60)
