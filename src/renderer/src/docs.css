@@ -165,13 +165,18 @@
 .dc-back:hover { background: var(--hover); color: var(--text); }
 .dc-doc__scroll { flex: 1; min-height: 0; overflow: auto; padding: 8px 24px 32px; display: flex; justify-content: center; }
 .dc-paper { width: 100%; max-width: 760px; display: flex; flex-direction: column; min-height: 0; }
+.dc-paper--wide { max-width: none; }
 .dc-paper h1 { margin: 0 0 4px; font-family: var(--i-display); font-weight: 800; font-size: 25px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .dc-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 18px; color: var(--text-3); font-size: 12.5px; }
-.dc-meta > span + span::before { content: '·'; margin-right: 8px; }
+.dc-meta.has-summary { margin-bottom: 8px; }
+.dc-summary { max-width: 760px; margin: 0 0 14px; color: var(--text-2); font-size: 14px; line-height: 1.5; }
+.dc-meta > * + *::before { content: '·'; margin-right: 8px; }
+.dc-meta__link { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.dc-meta__link:hover { text-decoration: underline; }
 .dc-meta__who { display: inline-flex; align-items: center; gap: 6px; }
 .dc-older { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 9px 10px 9px 13px; border-radius: 10px; background: var(--warn-soft); font-size: 13px; }
 .dc-older > span { flex: 1; min-width: 0; }
-.dc-viewer { position: relative; display: flex; flex-direction: column; min-height: 460px; height: calc(100vh - 290px); border-radius: 12px; border: 1px solid var(--border); background: var(--panel); overflow: hidden; }
+.dc-viewer { position: relative; display: flex; flex-direction: column; min-height: 460px; height: calc(100vh - 230px); border-radius: 12px; border: 1px solid var(--border); background: var(--panel); overflow: hidden; }
 .dc-viewer iframe { flex: 1; width: 100%; border: 0; background: #fff; }
 .dc-viewer .side-panel__text { background: var(--panel); }
 .dc-viewer .side-panel__doc { background: var(--panel); }
@@ -180,11 +185,12 @@
 .fv-reading { font-family: var(--font); font-size: 13.5px; line-height: 1.6; }
 
 /* what is behind a file */
-.dc-side { flex: none; width: 300px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--bg); }
+@keyframes dc-side-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+.dc-side { animation: dc-side-in 180ms var(--ease-out) both; flex: none; width: 300px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--bg); }
 .dc-side__body { padding: 22px 18px 28px; overflow: auto; }
+.dc-side__head { display: flex; align-items: center; justify-content: space-between; margin: -4px -4px 10px 0; }
+.dc-side__body .dc-side__head h5 { margin: 0; }
 .dc-side__body h5 { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
-.dc-oneline { margin: 0 0 18px; color: var(--text); font-size: 15px; line-height: 1.45; }
-.dc-oneline.is-muted { color: var(--text-3); font-size: 14px; }
 .dc-fold { border-top: 1px solid var(--border); }
 .dc-fold > summary { display: flex; align-items: center; gap: 8px; padding: 12px 2px; list-style: none; cursor: pointer; color: var(--text); }
 .dc-fold > summary::-webkit-details-marker { display: none; }
@@ -284,6 +290,24 @@
 .dc-board-doc { display: flex; align-items: center; gap: 8px; max-width: 100%; margin-top: 8px; padding: 4px 8px 4px 4px; border: 0; border-radius: 8px; background: var(--hover); color: var(--text-2); font: inherit; font-size: 12.5px; cursor: pointer; }
 .dc-board-doc:hover { color: var(--text); background: var(--active); }
 .dc-board-doc span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the bar's "Detalhes" button, while the column is open */
+.dc-doc__bar .btn.is-on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+/* a file in the whole window (not the browser's Fullscreen API); above the app's menus, below dialogs and toasts */
+.dc-full { position: fixed; inset: 0; z-index: 62; display: flex; flex-direction: column; background: var(--bg); }
+.dc-full__bar { flex: none; display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.dc-full__bar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.dc-full__hint { color: var(--text-3); font-size: 12.5px; }
+.dc-full__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dc-full__body iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+.dc-full__body .side-panel__text, .dc-full__body .side-panel__doc { background: var(--panel); }
+.dc-full__body.is-read { width: 100%; }
+.dc-full__body.is-read .side-panel__doc, .dc-full__body.is-read .side-panel__text { padding: 24px max(24px, calc((100% - 760px) / 2)) 32px; }
+/* macOS: the window buttons sit over the top-left corner, so the bar leaves room for them and still drags the window */
+:root[data-os='mac'] .dc-full__bar { padding-left: 84px; -webkit-app-region: drag; }
+:root[data-os='mac'] .dc-full__bar button { -webkit-app-region: no-drag; }
+@media (prefers-reduced-motion: reduce) { .dc-side { animation: none; } }
 
 /* ---------- narrow windows ---------- */
 @media (max-width: 900px) {

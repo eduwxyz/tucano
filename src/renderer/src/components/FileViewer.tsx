@@ -67,7 +67,9 @@ export function FileViewer({ url, kind, name, title, size, loadText, missing, fa
     case 'html':
       return <iframe src={url} sandbox="allow-scripts allow-popups" title={title} />
     case 'pdf':
-      return <iframe src={url} title={title} />
+      // Chromium's own viewer opens with a thumbnail strip and a small zoom; these open-parameters
+      // hide the strip and fit the page to the width. A url that already has a fragment keeps it.
+      return <iframe src={url.includes('#') ? url : `${url}#navpanes=0&view=FitH`} title={title} />
     case 'markdown':
       return <div className="side-panel__doc md">{text !== null && <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
     case 'csv':

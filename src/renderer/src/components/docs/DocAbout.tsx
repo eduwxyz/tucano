@@ -1,6 +1,6 @@
-// The right column of an open document: one line about it, then what is behind it in folded sections,
-// one open at a time: where it came from, its versions, who sees it.
-import { useState, type ReactNode } from 'react'
+// The right column of an open document, open unless the viewer closed it: what is behind it in folded sections,
+// one open at a time: where it came from, its versions, who sees it. (The summary sits under the title.)
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../../shared/lang'
 import { describeSchedule } from '../../../../shared/types'
 import type { Doc, DocAction, DocEvent, DocFolder, DocsTree, DocVersion } from '../../../../shared/docs'
@@ -54,13 +54,18 @@ function Fold({ title, meta, children, open }: { title: string; meta?: string; c
   )
 }
 
-export function DocAbout({ doc, folder, tree, words, may, history, historyError, viewing, onView }: { doc: Doc; folder: DocFolder; tree: DocsTree; words: AccessWords; may: boolean; history: History | null; historyError: string; viewing: number | null; onView: (n: number | null) => void }): ReactNode {
+export function DocAbout({ doc, folder, tree, words, may, history, historyError, viewing, onView, onClose }: { doc: Doc; folder: DocFolder; tree: DocsTree; words: AccessWords; may: boolean; history: History | null; historyError: string; viewing: number | null; onView: (n: number | null) => void; onClose: () => void }): ReactNode {
   const admin = useStore(amAdmin)
   const who = useActors()
   const conversation = useStore((s) => (doc.origin.conversationId ? s.conversations.some((c) => c.id === doc.origin.conversationId) : false))
   const [access, setAccess] = useState(false)
   const [busy, setBusy] = useState<number | null>(null)
   const routine = useRoutineOf(doc.routineId)
+  const side = useRef<HTMLElement>(null)
+  // In narrow windows this column sits below the document, so bring it into view when it opens.
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 900px)').matches) side.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
 
   const events = history?.events.slice().sort((a, b) => a.at - b.at) ?? []
   const versions = history?.versions.slice().sort((a, b) => b.n - a.n) ?? []
@@ -89,10 +94,14 @@ export function DocAbout({ doc, folder, tree, words, may, history, historyError,
   const steps = events.length + (asker || maker ? 1 : 0)
 
   return (
-    <aside className="dc-side">
+    <aside ref={side} className="dc-side">
       <div className="dc-side__body">
-        <h5>{L('Resumo', 'Summary')}</h5>
-        <p className={`dc-oneline ${doc.summary ? '' : 'is-muted'}`}>{doc.summary || L('Ainda sem resumo.', 'No summary yet.')}</p>
+        <div className="dc-side__head">
+          <h5>{L('Detalhes', 'Details')}</h5>
+          <button className="icon-btn" title={L('Fechar detalhes', 'Close details')} aria-label={L('Fechar detalhes', 'Close details')} onClick={onClose}>
+            <Icon name="x" size={15} />
+          </button>
+        </div>
 
         <Fold title={L('De onde veio', 'Where it came from')} meta={steps ? (steps === 1 ? L('1 passo', '1 step') : L(`${steps} passos`, `${steps} steps`)) : undefined}>
           {historyError && <p className="muted small">{historyError}</p>}
