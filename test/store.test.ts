@@ -100,6 +100,117 @@ describe("the window's messages", () => {
   })
 })
 
+describe('the navigation history', () => {
+  it('walks back and forward through the screens, like Slack', () => {
+    // Open on a channel: the first screen has no history.
+    let s = store.getState()
+    const start = s.view
+    expect(start).not.toBeNull()
+    expect(s.navBack).toEqual([])
+    expect(s.navForward).toEqual([])
+
+    // The same screen again doesn't start a step.
+    store.navigate({ ...start! })
+    s = store.getState()
+    expect(s.navBack).toEqual([])
+    expect(s.navForward).toEqual([])
+
+    // A channel, then a DM: each step stacks behind.
+    store.navigate({ kind: 'conversation', id: 'geral' })
+    store.navigate({ kind: 'conversation', id: 'dm' })
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'dm' })
+    expect(s.navBack).toEqual([{ kind: 'conversation', id: 'c2' }, { kind: 'conversation', id: 'geral' }])
+    expect(s.navForward).toEqual([])
+
+    // Back: the DM goes ahead, the channel comes back.
+    store.goBack()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'geral' })
+    expect(s.navBack).toEqual([{ kind: 'conversation', id: 'c2' }])
+    expect(s.navForward).toEqual([{ kind: 'conversation', id: 'dm' }])
+
+    // Back again: the first screen, with both ahead.
+    store.goBack()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'c2' })
+    expect(s.navBack).toEqual([])
+    expect(s.navForward).toEqual([{ kind: 'conversation', id: 'dm' }, { kind: 'conversation', id: 'geral' }])
+
+    // Forward: the channel, then the DM again.
+    store.goForward()
+    store.goForward()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'dm' })
+    expect(s.navBack).toEqual([{ kind: 'conversation', id: 'c2' }, { kind: 'conversation', id: 'geral' }])
+    expect(s.navForward).toEqual([])
+
+    // Nothing more ahead: forward is a no-op.
+    store.goForward()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'dm' })
+    expect(s.navForward).toEqual([])
+
+    // A new navigation branches: the forward stack clears.
+    store.navigate({ kind: 'conversation', id: 'other' })
+    s = store.getState()
+    expect(s.navBack).toEqual([
+      { kind: 'conversation', id: 'c2' },
+      { kind: 'conversation', id: 'geral' },
+      { kind: 'conversation', id: 'dm' }
+    ])
+    expect(s.navForward).toEqual([])
+  })
+
+  it('treats the Tuca builder as an overlay, not a step', () => {
+    const before = store.getState()
+    const where = before.view!
+    expect(where).not.toBeNull()
+
+    // Opening the builder leaves the history alone.
+    store.navigate({ kind: 'tuca', from: where })
+    let s = store.getState()
+    expect(s.navBack).toEqual(before.navBack)
+    expect(s.navForward).toEqual(before.navForward)
+
+    // Closing it (back to `from`) isn't a step either.
+    store.navigate(where)
+    s = store.getState()
+    expect(s.view).toEqual(where)
+    expect(s.navBack).toEqual(before.navBack)
+    expect(s.navForward).toEqual(before.navForward)
+
+    // Back, on the Tuca's screen, closes it: to where it was opened from, with the history as it was.
+    store.navigate({ kind: 'tuca', from: where })
+    store.goBack()
+    s = store.getState()
+    expect(s.view).toEqual(where)
+    expect(s.navBack).toEqual(before.navBack)
+    expect(s.navForward).toEqual(before.navForward)
+
+    // Leaving the builder for somewhere else steps from where it was opened.
+    store.navigate({ kind: 'tuca', from: where })
+    store.navigate({ kind: 'conversation', id: 'built' })
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'built' })
+    expect(s.navBack).toEqual([...before.navBack, where])
+    expect(s.navForward).toEqual([])
+  })
+})
+
+describe('the history, when something in it is removed', () => {
+  it('forgets the page of an agent that is gone, and keeps to its last 50 steps', () => {
+    store.navigate({ kind: 'agent', id: 'gone' })
+    store.navigate({ kind: 'board' })
+    expect(store.getState().navBack).toContainEqual({ kind: 'agent', id: 'gone' })
+    emit({ type: 'agent_removed', id: 'gone' })
+    expect(store.getState().navBack).not.toContainEqual({ kind: 'agent', id: 'gone' })
+    for (let i = 0; i < 60; i++) store.navigate(i % 2 ? { kind: 'board' } : { kind: 'approvals' })
+    expect(store.getState().navBack).toHaveLength(50)
+  })
+})
+
+
 describe('the side panel over the whole page', () => {
   it('widens only while a panel is open, and closing or leaving brings the conversation back', () => {
     store.navigate({ kind: 'conversation', id: 'c2' })
@@ -116,5 +227,46 @@ describe('the side panel over the whole page', () => {
     store.widenPanel(true)
     store.navigate({ kind: 'routines' })
     expect(store.getState()).toMatchObject({ panel: null, panelWide: false })
+  })
+
+  it('a file opened from a thread closes back to that thread, not to nothing', () => {
+    store.navigate({ kind: 'conversation', id: 'c2' })
+    store.openThread('x1')
+    store.openPanel({ kind: 'artifact', id: 'video' }) // a video posted in the thread
+    expect(store.getState().panel).toEqual({ kind: 'artifact', id: 'video' })
+    store.closePanel()
+    expect(store.getState().panel).toEqual({ kind: 'thread', id: 'x1' })
+    store.closePanel() // the thread's own close: now nothing
+    expect(store.getState().panel).toBe(null)
+    // Opened with no thread under it, or after leaving the conversation, it just closes.
+    store.openPanel({ kind: 'artifact', id: 'video' })
+    store.closePanel()
+    expect(store.getState().panel).toBe(null)
+    store.openThread('x1')
+    store.navigate({ kind: 'routines' })
+    store.navigate({ kind: 'conversation', id: 'c2' })
+    store.openPanel({ kind: 'artifact', id: 'video' })
+    store.closePanel()
+    expect(store.getState().panel).toBe(null)
+  })
+})
+
+describe('questions asked in threads', () => {
+  it("from the channel, finds the questions still open in its threads, oldest first", () => {
+    const ask = (id: string, at: number, threadId?: string, status: 'waiting_input' | 'done' = 'waiting_input'): Message =>
+      msg(id, 'c2', at, { author: { kind: 'agent', id: 'a1' }, ...(threadId ? { threadId } : {}), run: { status, steps: [] } })
+    emit({ type: 'message', message: ask('q-x1', 17, 'x1') })
+    emit({ type: 'message', message: ask('q-x2', 18, 'x2') })
+    emit({ type: 'message', message: ask('q-here', 19) })
+    const s = store.getState()
+    expect(store.threadAsksIn(s, 'c2').map((m) => m.id)).toEqual(['q-x1', 'q-x2'])
+    expect(store.askerIn(s, 'c2')?.id).toBe('q-here') // the channel's own question stays its own
+    expect(store.askerIn(s, 'c2', 'x1')?.id).toBe('q-x1')
+    // Answered, it leaves.
+    emit({ type: 'message', message: ask('q-x1', 17, 'x1', 'done') })
+    emit({ type: 'message', message: ask('q-here', 19, undefined, 'done') })
+    expect(store.threadAsksIn(store.getState(), 'c2').map((m) => m.id)).toEqual(['q-x2'])
+    emit({ type: 'message', message: ask('q-x2', 18, 'x2', 'done') })
+    expect(store.threadAsksIn(store.getState(), 'c2')).toEqual([])
   })
 })

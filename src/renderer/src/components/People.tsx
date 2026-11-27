@@ -522,6 +522,7 @@ const KINDS = (): [string, string][] => [
   ['skill', 'Skills'],
   ['routine', L('Rotinas', 'Routines')],
   ['channel', L('Canais', 'Channels')],
+  ['document', L('Documentos', 'Documents')],
   ['proposal', L('Propostas', 'Proposals')]
 ]
 
@@ -575,10 +576,16 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return typeof d['title'] === 'string' ? L(`apagou a fonte “${d['title']}” da wiki`, `deleted the source “${d['title']}” from the wiki`) : d['private'] ? L('apagou uma fonte da wiki que veio de uma conversa privada', 'deleted a wiki source that came from a private conversation') : L('apagou uma fonte da wiki', 'deleted a wiki source')
     case 'channel.deleted':
       return named ? L(`excluiu o canal #${named}`, `deleted the #${named} channel`) : L('excluiu um canal', 'deleted a channel')
+    case 'document.to_personal':
+      return named ? L(`levou o documento “${named}”${typeof d['folder'] === 'string' && d['folder'] ? `, de ${d['folder']},` : ''} para a pasta pessoal`, `took the document “${named}”${typeof d['folder'] === 'string' && d['folder'] ? `, from ${d['folder']},` : ''} to their personal folder`) : L('levou um documento para a pasta pessoal', 'took a document to their personal folder')
+    case 'document.folder_access':
+      return named ? L(`mudou quem vê a pasta “${named}” em Documentos`, `changed who sees the folder “${named}” in Documents`) : L('mudou quem vê uma pasta em Documentos', 'changed who sees a folder in Documents')
     case 'dm.deleted':
       return L('apagou uma conversa privada', 'deleted a private conversation')
     case 'vault_key.imported':
       return L(`importou ${String(d['count'] ?? '')} chaves pro Cofre`, `imported ${String(d['count'] ?? '')} keys into the Vault`)
+    case 'document.deleted':
+      return named ? L(`apagou de vez o documento “${named}”${typeof d['folder'] === 'string' && d['folder'] ? `, de ${d['folder']}` : ''}`, `deleted the document “${named}” for good${typeof d['folder'] === 'string' && d['folder'] ? `, from ${d['folder']}` : ''}`) : L('apagou um documento de vez', 'deleted a document for good')
     case 'channel.summary_edited':
       return L('editou o resumo de um canal', "edited a channel's summary")
   }

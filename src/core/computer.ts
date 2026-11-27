@@ -89,6 +89,16 @@ export function lentWhereTheyAre(folders: readonly LentFolder[], opts: { home?: 
   })
 }
 
+// A folder an agent asks for on a card: "~/…" or a full path, checked as lending it would be.
+// Its real path, or why it can't be lent.
+export function folderToLend(raw: string, dataDir: string, home = homedir()): { path?: string; error?: string } {
+  const given = raw.trim()
+  const path = given === '~' ? home : given.startsWith('~/') ? join(home, given.slice(2)) : given
+  if (!path.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(path)) return { error: L(`"${given}": mande o caminho inteiro, como ~/Documentos/projeto.`, `"${given}": send the whole path, like ~/Documents/project.`) }
+  const why = checkFolder(path, { home, dataDir, named: true })
+  return why ? { error: why } : { path: realpathSync(path) }
+}
+
 // /projetos/<name>: the folder's name, made safe, and unique among the agent's folders.
 export function folderName(path: string, taken: string[]): string {
   const base = basename(path).toLowerCase().normalize('NFD').replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '') || 'pasta'
@@ -370,6 +380,17 @@ export function hostUrl(url: string, ports: Record<number, number>): string | { 
 
 const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
+// Limits every computer gets. None of them gets in the way of what agents do (root, apt,
+// npm, servers, chown of lent folders): no gaining privileges through setuid programs, a
+// ceiling on processes against fork bombs, and no raw sockets, device files or audit writes.
+export const HARDENING = [
+  '--security-opt', 'no-new-privileges',
+  '--pids-limit', '2048',
+  '--cap-drop', 'NET_RAW',
+  '--cap-drop', 'MKNOD',
+  '--cap-drop', 'AUDIT_WRITE'
+]
+
 // ---------- docker ----------
 
 type Exec = { code: number; stdout: string; stderr: string; late?: boolean } // late: killed by its timeout
@@ -594,6 +615,7 @@ export class Computers {
           '--init',
           '--memory', '3g',
           '--cpus', '2',
+          ...HARDENING,
           '-w', WORK,
           '-v', `${folder}:${WORK}`,
           ...mounts,

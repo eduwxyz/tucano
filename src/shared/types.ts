@@ -5,6 +5,7 @@ import type { ActionRules, Autonomy } from './actions'
 import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
+import type { InboxDoc, InboxDocDate } from './docs'
 import type { PageSigns } from './wall'
 import { L, lang, locale, type Lang } from './lang'
 
@@ -358,7 +359,12 @@ export interface UndoInfo {
 }
 
 // What the Tuca may propose to change in an agent that exists.
-export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit' | 'computer' | 'computerKind' | 'browser' | 'folders' | 'fallbackModelId'>>
+// What grants access or spends money: connectors, the month's limit, a computer (a shell), a
+// browser, folders lent to the computer. Asked for on a card, these always wait for a person's click.
+export const ACCESS_CHANGES: readonly string[] = ['grants', 'limit', 'computer', 'computerKind', 'browser', 'folders']
+export const isAccessChange = (k: string): boolean => ACCESS_CHANGES.includes(k)
+export const onlyAccessChanges = (c: AgentChanges): boolean => Object.keys(c).every(isAccessChange)
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
@@ -474,6 +480,8 @@ export interface Inbox {
   answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
   harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
+  documents?: InboxDoc[] // documents waiting for this person to approve
+  docDates?: InboxDocDate[] // dates found in documents they look after, coming up
 }
 
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
@@ -589,6 +597,7 @@ export interface Settings {
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
+  defaultFallbackModel?: string // the reserve model of every agent with none of its own (Settings › Models)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core); kept for installs from before Settings › Classifiers
   classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
   classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off
@@ -867,6 +876,7 @@ const model = (id: string, engine: EngineId, label: string, pt: string, en: stri
 export const MODELS: Model[] = [
   model('sonnet', 'claude', 'Sonnet', 'Bom pra maioria', 'Good for most things'),
   model('opus', 'claude', 'Opus', 'Tarefas longas e difíceis', 'Long, hard tasks'),
+  model('fable', 'claude', 'Fable', 'O mais capaz, pros problemas mais difíceis', 'The most capable, for the hardest problems'),
   model('haiku', 'claude', 'Haiku', 'Rápido, gasta pouco do plano', 'Fast, uses little of the plan'),
   model('gpt-5.6-luna', 'codex', 'GPT-5.6 Luna', 'Bom pra maioria', 'Good for most things'),
   model('gpt-5.6-terra', 'codex', 'GPT-5.6 Terra', 'Problemas difíceis', 'Hard problems'),
@@ -930,6 +940,9 @@ export interface Connector {
   args?: string[]
   envKeys?: string[] // names only; values are secrets
   auth: ConnectorAuth
+  // The picture this connector wears in the app, as a data URL (an image picked by the person): a
+  // server added by hand is otherwise a terminal or a globe. Empty: the store's mark, or its kind's icon.
+  icon?: string
   status: ConnectorStatus
   error?: string
   errorDetail?: string // the raw error and its causes (a certificate's code, the DNS's), under "Ver detalhes"

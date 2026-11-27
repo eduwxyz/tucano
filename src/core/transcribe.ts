@@ -27,7 +27,8 @@ const MODEL_DIRS = (home: string): string[] => [join(home, '.cache', 'whisper-cp
 
 export interface VoicePlaces {
   bundled?: string // the folder with the whisper-cli that came with the app
-  models: string // where the app keeps the models it downloads
+  models: string // where the app keeps the models it downloads: one folder for every workspace
+  own?: string // the workspace's own folder, where a model downloaded before the shared one still is
 }
 
 const findBin = (path: string | undefined, bundled?: string): string | undefined =>
@@ -42,20 +43,23 @@ const modelsIn = (dir: string): string[] => {
 }
 
 // The best one there: the app's own first, and turbo before the rest, since it's what's fast enough to dictate with.
-function findModel(home: string, own?: string): string | undefined {
-  const mine = own ? modelsIn(own) : []
+function findModel(home: string, places?: VoicePlaces): string | undefined {
+  const mine = places ? appDirs(places).flatMap(modelsIn) : []
   const all = [...mine, ...MODEL_DIRS(home).flatMap(modelsIn)]
   return all.find((f) => f.includes('turbo')) ?? all.sort().at(-1)
 }
 
+// The app's folders, the shared one first: a workspace never downloads again what another one did.
+export const appDirs = (places: VoicePlaces): string[] => (places.own && places.own !== places.models ? [places.models, places.own] : [places.models])
+
 // Which of the app's models is downloaded, if any.
-export const downloaded = (dir: string): VoiceModelId[] => (Object.keys(VOICE_MODELS) as VoiceModelId[]).filter((id) => existsSync(join(dir, VOICE_MODELS[id].file)))
+export const downloaded = (...dirs: string[]): VoiceModelId[] => (Object.keys(VOICE_MODELS) as VoiceModelId[]).filter((id) => dirs.some((dir) => existsSync(join(dir, VOICE_MODELS[id].file))))
 
 export function voiceStatus(voice: VoiceSettings | undefined, env: NodeJS.ProcessEnv = process.env, home = homedir(), places?: VoicePlaces): VoiceStatus {
   const bin = voice?.bin ? (existsSync(voice.bin) ? voice.bin : undefined) : findBin(env['PATH'] ?? env['Path'], places?.bundled)
-  const model = voice?.model ? (existsSync(voice.model) ? voice.model : undefined) : findModel(home, places?.models)
-  const ownModel = places ? (Object.keys(VOICE_MODELS) as VoiceModelId[]).find((id) => model === join(places.models, VOICE_MODELS[id].file)) : undefined
-  return { bin, model, ready: !!bin && !!model, ...(ownModel ? { ownModel } : {}), ...(places ? { downloaded: downloaded(places.models) } : {}) }
+  const model = voice?.model ? (existsSync(voice.model) ? voice.model : undefined) : findModel(home, places)
+  const ownModel = places ? (Object.keys(VOICE_MODELS) as VoiceModelId[]).find((id) => appDirs(places).some((d) => model === join(d, VOICE_MODELS[id].file))) : undefined
+  return { bin, model, ready: !!bin && !!model, ...(ownModel ? { ownModel } : {}), ...(places ? { downloaded: downloaded(...appDirs(places)) } : {}) }
 }
 
 // The model, fetched once: to a .part file, hashed on the way, and moved into place only if it's
@@ -82,7 +86,9 @@ export class ModelDownload {
     this.progress = { model: id, received: 0, total: m.bytes }
     this.changed()
     mkdirSync(this.dir, { recursive: true })
-    const part = join(this.dir, `${m.file}.part`)
+    // Named after this process: the folder is shared by every workspace, and two downloading at once
+    // must not write into the same file.
+    const part = join(this.dir, `${m.file}.${process.pid}.part`)
     let last = 0
     try {
       const res = await this.fetcher(MODEL_URL(m.file), { signal: abort.signal, redirect: 'follow' })
@@ -129,12 +135,14 @@ export class ModelDownload {
   }
 }
 
-// What whisper prints for silence, not words.
+// What whisper prints for silence, not words: a whole line in brackets or parentheses.
 const NOT_SPEECH = /^[[(][^\])]*[\])]$/
+// And sounds it names inside a line: [BLANK_AUDIO], *Loud noise*. Asterisks only around words, so "2 * 3" stays.
+const SOUND = /\[[^\]\n]{1,40}\]|\*[^*\s][^*\n]{0,38}[^*\s]\*|\*[^*\s]\*/g
 export const cleanTranscript = (out: string): string =>
   out
     .split('\n')
-    .map((l) => l.trim())
+    .map((l) => l.replace(SOUND, ' ').replace(/\s+/g, ' ').trim())
     .filter((l) => l && !NOT_SPEECH.test(l))
     .join(' ')
 

@@ -103,10 +103,15 @@ describe('the words and the layout a person reads (round 2, 13)', () => {
   it('the activity log says in words what happened to a wiki source, a channel, a DM, a summary', () => {
     const at = 1
     expect(activityText({ id: '1', at, personId: 'ana', kind: 'wiki.source_removed', detail: { title: 'Ata de março' } }, fake, new Map())).toBe('apagou a fonte “Ata de março” da wiki')
+    // A document deleted for good leaves nothing behind but this line: what it was called and where it was.
+    expect(activityText({ id: '3', at, personId: 'ana', kind: 'document.deleted', target: 'd1', detail: { name: 'contrato.pdf', folder: 'Empresa › Contratos' } }, fake, new Map())).toBe('apagou de vez o documento “contrato.pdf”, de Empresa › Contratos')
     expect(activityText({ id: '2', at, personId: 'ana', kind: 'wiki.source_removed', detail: { private: true } }, fake, new Map())).toBe('apagou uma fonte da wiki que veio de uma conversa privada')
     expect(activityText({ id: '2b', at, personId: 'ana', kind: 'wiki.source_removed' }, fake, new Map())).toBe('apagou uma fonte da wiki')
     expect(activityText({ id: '3', at, personId: 'ana', kind: 'channel.deleted', detail: { name: 'vendas' } }, fake, new Map())).toBe('excluiu o canal #vendas')
     expect(activityText({ id: '4', at, personId: 'ana', kind: 'dm.deleted' }, fake, new Map())).toBe('apagou uma conversa privada')
+    // Documents: what leaves the team's folders for a personal one, and a change of who sees a folder.
+    expect(activityText({ id: '4b', at, personId: 'ana', kind: 'document.to_personal', target: 'd1', detail: { name: 'contrato.pdf', folder: 'Financeiro' } }, fake, new Map())).toBe('levou o documento “contrato.pdf”, de Financeiro, para a pasta pessoal')
+    expect(activityText({ id: '4c', at, personId: 'ana', kind: 'document.folder_access', target: 'f1', detail: { name: 'Financeiro' } }, fake, new Map())).toBe('mudou quem vê a pasta “Financeiro” em Documentos')
     expect(activityText({ id: '5', at, personId: 'ana', kind: 'channel.summary_edited', target: 'ch' }, fake, new Map())).toBe('editou o resumo de um canal')
   })
 

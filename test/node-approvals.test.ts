@@ -254,6 +254,49 @@ describe("a node's command and file write keep their class on the server", () =>
     expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: 'node_write_file' })
   })
 
+  // On this computer a bare command can't be allowed for good (only a kind of action can): the same on a node.
+  // Else "always" on an `ls` would be node_bash's for good, and every command after it would run past what
+  // its class or the outside-content guard would ask: a push, a curl sending a file out.
+  it('"always allow" on a bare command never allows node_bash for good', async () => {
+    db.updateTool(nodeId, NODE_BASH, { cls: 'sensitive' }) // the person made every command ask
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'ls' } }, null, { tool: NODE_BASH, args: { command: 'git push origin main' } }))
+    await r.send('d1', 'liste')
+    await r.idle()
+    const first = db.approvals()[0]!
+    expect(first).toMatchObject({ state: 'pending', tool: NODE_BASH })
+    await r.decide(first.id, 'approved', undefined, true)
+    await r.idle()
+    expect(ran).toEqual(['ls'])
+    expect(db.agent('a1')?.autoApprove ?? []).not.toContain(`${nodeId}:${NODE_BASH}`)
+
+    await r.send('d1', 'suba')
+    await r.idle()
+    expect(ran).toEqual(['ls']) // the push waits for the person
+    expect(db.approvals().filter((a) => a.state === 'pending')).toMatchObject([{ tool: NODE_BASH, args: { command: 'git push origin main' } }])
+  })
+
+  it('"always allow" on a push still turns pushing to "does it alone", as on this computer', async () => {
+    db.saveAgent(agent({ autonomy: 'careful' }))
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'git push origin main' } }))
+    await r.send('d1', 'suba')
+    await r.idle()
+    await r.decide(db.approvals()[0]!.id, 'approved', undefined, true)
+    await r.idle()
+    expect(ran).toEqual(['git push origin main'])
+    expect(db.agent('a1')?.actionRules?.push).toBe('auto')
+    expect(db.agent('a1')?.autoApprove ?? []).not.toContain(`${nodeId}:${NODE_BASH}`)
+  })
+
+  it('a node_bash allowed for good before (0.2.36) is not honored', async () => {
+    db.updateTool(nodeId, NODE_BASH, { cls: 'sensitive' })
+    db.saveAgent({ ...agent(), autoApprove: [`${nodeId}:${NODE_BASH}`] })
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'cat ~/.ssh/id_ed25519' } }))
+    await r.send('d1', 'leia')
+    await r.idle()
+    expect(ran).toEqual([])
+    expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: NODE_BASH })
+  })
+
   it("a tool its owner marked high risk on the computer is high risk on the server, and can't be unmarked there", async () => {
     const t = db.tools(nodeId).find((x) => x.name.endsWith('delete_project'))!
     expect(t).toMatchObject({ highRisk: true, lockedHighRisk: true, cls: 'sensitive' })
