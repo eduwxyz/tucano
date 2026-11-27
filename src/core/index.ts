@@ -16,9 +16,9 @@ import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type LentFolder, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, routineCap, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
-import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, setChannelMembers as saveChannelMembers, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
-import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
+import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
@@ -93,7 +93,6 @@ import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
 import { staleTeamUps, teamUpDays } from './team-up'
-import type { MemberMode } from '../shared/types'
 import { agentFromDraft, availableModels, freeHandle, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { guideIndex, readGuide } from './guide'
 import { McpDoor, type McpCaller, type McpHttpOut, type RunLine } from './mcp'
@@ -2387,17 +2386,7 @@ const api: Handlers = {
     emitConversations([id])
   },
   setChannelMembers: ({ id, agentIds, modes }, ctx) => {
-    const conv = db.conversation(id)
-    if (conv?.kind !== 'channel') return
-    if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
-    assertChannelVisible(db, ctx.person, conv)
-    const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
-    const kept = membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a)))
-    // One mode per agent. Only members of the channel can have one; a hidden agent never gets in.
-    const chosen: Record<string, MemberMode> = Object.fromEntries(
-      kept.filter((a) => modes?.[a] === 'mention').map((a) => [a, 'mention'])
-    )
-    db.setMembers(id, kept, modes ? chosen : undefined)
+    saveChannelMembers(db, ctx.person, { id, agentIds, ...(modes ? { modes } : {}) })
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,

@@ -6324,22 +6324,19 @@ table.csv th {
   display: flex;
   flex-direction: column;
 }
-.member__pick {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  text-align: left;
+.member__check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border-strong);
+  color: #fff;
 }
-.member__mode select {
-  max-width: 160px;
-  min-height: 32px;
-  padding: 4px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
+.member.is-on .member__check {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 .composer-silent {
   margin: 0 0 6px;

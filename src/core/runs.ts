@@ -25,7 +25,7 @@ import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOL
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
 import { noNewsPhrase, noNewsRun } from '../shared/routine-news'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
+import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom, tucaAgent } from './tuca'
 import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
 import { LER_GUIA, readGuide } from './guide'
 import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState, type Machine } from './tuca-help'
@@ -44,9 +44,9 @@ import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
-import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, routinePerson, toPeopleOnly } from './people'
+import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, routinePerson, setChannelMembers, toPeopleOnly } from './people'
 import { can, isAdmin } from './policy-people'
-import { agentsFor } from './access-policy'
+import { agentsFor, assertAgentVisible } from './access-policy'
 import { covers, restricted, sharedAccess } from '../shared/access'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, shellClass, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
@@ -706,12 +706,33 @@ export class Runner {
     const reading = docs.map((f) => this.keepFile(mine, f))
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
+    // An answer on the @-to-include card is already this turn's decision: no second prompt goes out.
+    if (asked?.run?.inclusion && q) {
+      await this.answerInclusion(asked, q, writer, typed, mine)
+      return
+    }
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
     const members = this.members(conv)
     const may = agentsFor(writer, members) // a restricted member never calls an agent they can't see, by name or through the router
-    let responders = mentioned(typed, may).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
+    // A @ calls a reachable agent even when they are outside the room, but only the members answer
+    // without a card. The second reach check and the private audience are tested before the card.
+    const reachable = agentsFor(writer, db.agents())
+    const namedAgents = mentioned(typed, reachable).slice(0, MAX_MENTIONS)
+    let responders = namedAgents.filter((a) => may.some((m) => m.id === a.id)) // what I wrote: an option's label never calls anyone
+    const outsiders = this.inclusionCandidates(conv, writer, typed).filter((a) => !may.some((m) => m.id === a.id)).slice(0, MAX_MENTIONS)
+    // A @ inside a request to open a room is the pedir tool's observadores, not a membership card.
+    const openingRoom = /\b(?:na sala|in (?:the )?room)\b/i.test(typed)
+    if (outsiders.length && !asked && !openingRoom) {
+      const deadlineAt = Date.now() + this.deadlineMs(await this.deps.settings())
+      this.offerInclusion(conv, replyIn, mine, writer, outsiders, deadlineAt)
+      return
+    }
+    // A reply calls the agent it answers, ahead of the router: they wrote what is being answered,
+    // so the decision is not left to the router guessing from the text. To a person, it calls no one.
+    const replyAgent = mine.reply?.agentId
+    if (!responders.length && !toPeople && replyAgent) responders = may.filter((a) => a.id === replyAgent)
     const answerers = this.answering(conv, may, responders)
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
@@ -1227,6 +1248,115 @@ export class Runner {
   private answering(conv: Conversation, agents: Agent[], named: Agent[]): Agent[] {
     const called = new Set(named.map((a) => a.id))
     return agents.filter((a) => conv.modes?.[a.id] !== 'mention' || called.has(a.id))
+  }
+
+  // A person's @ reaches all the agents they can see, not only the ones in the room. The room's
+  // private audience is checked here as well, so a hidden or out-of-audience name never makes a card.
+  private inclusionCandidates(conv: Conversation, writer: Person, text: string): Agent[] {
+    const { db } = this.deps
+    const named = mentioned(text, agentsFor(writer, db.agents()))
+    const audienceId = inheritedAudience(conv, db.ownerId())
+    const audience = audienceId ? db.person(audienceId) ?? db.owner() : undefined
+    return named.filter((a) => {
+      if (a.archived || a.kind === 'tuca') return false
+      try {
+        assertAgentVisible(db, writer, a.id)
+        if (audience) assertAgentVisible(db, audience, a.id)
+        return true
+      } catch {
+        return false
+      }
+    })
+  }
+
+  // One card for every outside agent named in the message: Include brings them all in together, Skip
+  // leaves the room as it was. The Tuca owns the card only because a Decision needs an agent's message.
+  private offerInclusion(conv: Conversation, threadId: string | undefined, source: Message, writer: Person, outsiders: Agent[], deadlineAt: number): void {
+    const { db, emit } = this.deps
+    // A fresh workspace may not have talked to the Tuca yet: the card is his, so he is made here.
+    let tuca = db.agents().find((a) => a.kind === 'tuca' && !a.archived)
+    if (!tuca) {
+      tuca = tucaAgent('sonnet', db.agents().map((a) => a.handle))
+      db.saveAgent(tuca)
+      emit({ type: 'agent', agent: tuca })
+    }
+    const names = outsiders.map((a) => a.name).join(L(' e ', ' and '))
+    const decision: Decision = {
+      question: L(`Incluir ${names} nesta conversa?`, `Include ${names} in this conversation?`).slice(0, 200),
+      kind: 'single',
+      options: [
+        { label: L('Incluir', 'Include'), description: L('Entra na conversa e responde a esta mensagem.', 'Joins the conversation and answers this message.'), recommended: true },
+        { label: L('Pular', 'Skip'), description: L('Fica de fora. A menção não chama ninguém.', 'Stays out. The mention calls no one.') }
+      ]
+    }
+    const handles = outsiders.map((a) => `@${a.handle}`).join(', ')
+    const card: Message = {
+      id: randomUUID(),
+      conversationId: conv.id,
+      author: { kind: 'agent', id: tuca.id },
+      text: L(`Você mencionou ${handles}, que não está na conversa.`, `You mentioned ${handles}, who is not in the conversation.`),
+      at: Date.now(),
+      ...(threadId ? { threadId } : {}),
+      run: {
+        status: 'waiting_input',
+        steps: [],
+        question: decision.question,
+        questions: [decision],
+        askedTo: writer.id,
+        inclusion: { messageId: source.id, text: source.text.slice(0, 4000), agentIds: outsiders.map((a) => a.id), by: writer.id }
+      }
+    }
+    db.saveMessage(card)
+    emit({ type: 'message', message: card })
+    const q: Question = { id: card.id, conversationId: conv.id, ...(threadId ? { threadId } : {}), agentId: tuca.id, text: decision.question, askedTo: writer.id, requestedBy: writer.id, state: 'open', deadlineAt, createdAt: card.at }
+    db.saveQuestion(q)
+    emit({ type: 'inbox' })
+    this.deps.notify?.(L('O Tuca pede uma decisão', 'The Tuca asks for a decision'), decision.question, conv.id, 'question', threadId, [writer.id], card.id)
+  }
+
+  // The card is answered here, without a second prompt: Include writes membership with the same
+  // setChannelMembers the dialog uses, then the original mention wakes the agents in this turn.
+  private async answerInclusion(card: Message, q: Question | undefined, writer: Person, typed: string, replyTo: Message): Promise<void> {
+    const { db, emit } = this.deps
+    const run = card.run!
+    const inc = run.inclusion!
+    const conv = db.conversation(card.conversationId)
+    if (!conv) return
+    const chosen = run.answers?.[0]?.chosen?.[0]
+    const include = chosen === 0 || /^(?:incluir|include)$/i.test(typed.trim())
+    if (q?.state === 'open') {
+      db.saveQuestion({ ...q, state: 'answered', answeredBy: writer.id, answeredAt: Date.now() })
+      emit({ type: 'inbox' })
+    }
+    this.update(card, { run: { ...run, status: 'done', answeredBy: writer.id, ...(typed ? { answeredInText: true as const } : {}) } })
+    if (!include) return
+
+    // Reach is checked again now, on the person who approved and on the room's private audience.
+    const named = mentioned(inc.text, agentsFor(writer, db.agents()))
+    const audienceId = inheritedAudience(conv, db.ownerId())
+    const audience = audienceId ? db.person(audienceId) ?? db.owner() : undefined
+    const allowed = named.filter((a) => inc.agentIds.includes(a.id) && !conv.members.includes(a.id) && !a.archived && a.kind !== 'tuca' && (() => {
+      try {
+        assertAgentVisible(db, writer, a.id)
+        if (audience) assertAgentVisible(db, audience, a.id)
+        return true
+      } catch {
+        return false
+      }
+    })())
+    if (!allowed.length) return
+    setChannelMembers(db, writer, { id: conv.id, agentIds: [...conv.members, ...allowed.map((a) => a.id)], allowDm: true })
+    emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
+    const cap = await this.repliesAtOnce()
+    const answer = async (): Promise<unknown> => {
+      let before: Promise<Message | undefined> | undefined
+      for (const agent of allowed) {
+        const go = (): Promise<Message | undefined> => this.startReply(agent, conv, { depth: 1, threadId: card.threadId, replyTo: inc.messageId }, { urgent: true, parallel: true })
+        before = before ? before.then(go, go) : go()
+      }
+      return before ?? Promise.resolve()
+    }
+    this.runIn(conv.id, answer, replyTo, cap)
   }
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.

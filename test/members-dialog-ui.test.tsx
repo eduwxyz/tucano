@@ -1,12 +1,12 @@
-// The members dialog: one answer/mention select per agent, the count of agents who answer normally,
-// and the modes sent back with the membership on Save.
+// The members dialog is a membership list again: one button per agent, a check glyph when included,
+// no mode select, a count of agents in the room, and a save of the checked ids alone.
 import { parseHTML } from 'linkedom'
 import { act, type ReactNode } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
 
-const save = vi.fn(async (_id: string, _ids: string[], _modes: Record<string, string>) => {})
+const save = vi.fn(async (_id: string, _ids: string[]) => {})
 let state: Record<string, unknown>
 const agents = [
   { id: 'lia', name: 'Lia', handle: 'lia', role: 'Research' },
@@ -20,10 +20,10 @@ vi.mock('../src/renderer/src/store', () => ({
   canEditChannel: () => true,
   openDialog: vi.fn(),
   getState: () => state,
-  setChannelMembers: (id: string, ids: string[], modes: Record<string, string>) => save(id, ids, modes)
+  setChannelMembers: (id: string, ids: string[]) => save(id, ids)
 }))
 vi.mock('../src/renderer/src/components/Modal', () => ({ Modal: ({ title, children }: { title: string; children: ReactNode }) => <div data-title={title}>{children}</div> }))
-vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, Icon: () => null }))
+vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, Icon: ({ name }: { name: string }) => <span data-icon={name} /> }))
 vi.mock('../src/renderer/src/components/WorkspaceManager', () => ({ WorkspaceManager: () => null }))
 vi.mock('../src/renderer/src/components/LoginTerminal', () => ({ LoginHost: () => null }))
 vi.mock('../src/renderer/src/components/Feedback', () => ({ FeedbackDialog: () => null }))
@@ -36,6 +36,7 @@ beforeEach(() => {
   state = {
     agents,
     dialog: { kind: 'members', id: 'ch' },
+    // Modes stay in the conversation for silent witnesses; the dialog never reads or writes them.
     conversations: [{ id: 'ch', kind: 'channel', name: 'geral', members: ['lia', 'theo'], modes: { lia: 'mention', theo: 'answer' } }]
   }
   root = createRoot(document.getElementById('root')!)
@@ -47,24 +48,24 @@ const open = async (): Promise<string> => {
   return document.getElementById('root')!.innerHTML
 }
 
-it('shows one mode select per agent and counts those who answer normally', async () => {
+it('shows one toggle per agent, checks only the two in the room and offers no mode select', async () => {
   const html = await open()
-  const selects = [...document.querySelectorAll('select')]
-  expect(selects).toHaveLength(3) // one per agent, including one not in the room
-  expect(selects.filter((s) => (s as HTMLSelectElement).value === 'mention')).toHaveLength(1)
-  expect(html).toContain('1 agente responde')
-  expect(html).not.toContain('member__check') // the per-agent checkbox is gone
+  const rows = [...document.querySelectorAll('button.member')]
+  expect(rows).toHaveLength(3) // one button per agent
+  expect(document.querySelectorAll('select')).toHaveLength(0) // no mode control anywhere in the dialog
+  expect(document.querySelectorAll('[data-icon="check"]')).toHaveLength(2) // checked rows: 2 agents
+  expect(html).toContain('2 agentes')
+  expect(html).toContain('Quem está no canal lê a conversa e pode responder. Pra chamar alguém específico, use @.')
+  expect(html).not.toContain('agentes respondem')
 })
 
-it('saves one mode per agent and keeps a removed agent out of the mode list', async () => {
+it('saves only the checked membership and keeps a silent member silent on round trip', async () => {
   await open()
-  const select = document.querySelectorAll('select')[0] as HTMLSelectElement
-  await act(async () => {
-    const options = select.querySelectorAll('option')
-    ;(options[0] as unknown as { selected: boolean }).selected = true
-    select.dispatchEvent(new window.Event('change', { bubbles: true }))
-  })
+  const rows = [...document.querySelectorAll('button.member')] as HTMLButtonElement[]
+  await act(async () => rows[2]!.click()) // Nina, out of the room, goes in
+  await act(async () => rows[1]!.click()) // Theo, in the room, goes out
   const saveButton = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Salvar') as HTMLButtonElement
   await act(async () => saveButton.click())
-  expect(save).toHaveBeenCalledWith('ch', ['lia', 'theo'], { lia: 'answer', theo: 'answer' })
+  expect(save).toHaveBeenCalledWith('ch', ['lia', 'nina'])
+  expect(save.mock.calls[0]).toHaveLength(2) // no modes argument from the restored dialog
 })

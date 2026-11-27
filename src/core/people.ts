@@ -12,7 +12,7 @@ import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
 import { harnessSummary } from './mcp'
-import { agentsFor, assertAgentVisible, peopleFor, viewedConversations, withinAccess } from './access-policy'
+import { agentsFor, assertAgentVisible, assertChannelVisible, membersFor, peopleFor, viewedConversations, withinAccess } from './access-policy'
 import { cleanAccess, covers, EVERYTHING, restricted, seesAgent } from '../shared/access'
 
 export { isAdmin }
@@ -146,6 +146,19 @@ export function mayEditChannel(person: Person, c: Pick<Conversation, 'kind' | 'c
   return isAdmin(person) || (c.createdBy ?? ownerId) === person.id
 }
 export const channelEditError = (): string => L('Só quem criou o canal ou um admin muda o nome, o tema, os agentes e as configurações dele.', "Only whoever created the channel or an admin changes its name, topic, agents and settings.")
+
+// The one membership write, used by the channel dialog and by a person's approval of an @mention.
+// A mode change only comes from the stored modes; a membership change keeps a silent member silent.
+export function setChannelMembers(db: Db, person: Person, p: { id: string; agentIds: string[]; modes?: Record<string, 'answer' | 'mention'>; allowDm?: boolean }): void {
+  const conv = db.conversation(p.id)
+  if (!conv || (conv.kind !== 'channel' && !(conv.kind === 'dm' && p.allowDm))) return
+  assertChannelVisible(db, person, conv)
+  if (conv.kind === 'channel' && !mayEditChannel(person, conv, db.ownerId())) throw new Error(channelEditError())
+  const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
+  const kept = membersFor(db, person, conv.members, p.agentIds.filter((a) => known.has(a)))
+  const chosen: Record<string, 'answer' | 'mention'> = Object.fromEntries(kept.filter((a) => p.modes?.[a] === 'mention').map((a) => [a, 'mention' as const]))
+  db.setMembers(p.id, kept, p.modes ? chosen : undefined)
+}
 
 // "@bia", "@biasouza": how a person is called in a message. The first name, when no one else has
 // it, or the whole name run together; accents and spaces gone, like a handle.

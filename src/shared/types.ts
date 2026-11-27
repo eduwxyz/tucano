@@ -284,6 +284,7 @@ export interface Run {
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
   feedbackDraft?: FeedbackDraft // a bug or an idea for the people who make Tucano, written by the Tuca with propor_feedback: the person reviews and sends it
   leave?: LeaveAsk // the Tuca's question on this reply asks leave to do something himself (fazer_eu_mesmo): what for, and how it was answered
+  inclusion?: { messageId: string; text: string; agentIds: string[]; by: string } // a person's @mention of agents outside the room: the approval card waits on Include or Skip
   proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
   delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back

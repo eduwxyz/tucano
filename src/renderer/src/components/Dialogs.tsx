@@ -98,7 +98,7 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'feedback') return <FeedbackDialog {...(dialog.image ? { image: dialog.image } : {})} {...(dialog.draft ? { draft: dialog.draft } : {})} {...(dialog.from ? { from: dialog.from } : {})} onClose={close} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
-  if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} modes={conv.modes} onClose={close} />
+  if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} onClose={close} />
   return <SettingsDialog conv={conv} onClose={close} />
 }
 
@@ -191,60 +191,44 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
 }
 
 // Who is in the channel: a row per agent, on or off, saved together.
-function MembersDialog({ id, name, members, modes, onClose }: { id: string; name: string; members: string[]; modes?: Record<string, 'answer' | 'mention'>; onClose: () => void }): ReactNode {
+function MembersDialog({ id, name, members, onClose }: { id: string; name: string; members: string[]; onClose: () => void }): ReactNode {
   const agents = useStore((s) => s.agents.filter(isTeam))
   const [picked, setPicked] = useState<string[]>(members)
-  const [chosen, setChosen] = useState<Record<string, 'answer' | 'mention'>>(modes ?? {})
   const [error, setError] = useState<string | null>(null)
   const toggle = (a: string): void => setPicked(picked.includes(a) ? picked.filter((x) => x !== a) : [...picked, a])
-  const mode = (a: string): 'answer' | 'mention' => chosen[a] === 'mention' ? 'mention' : 'answer'
-  const saveModes = (): Record<string, 'answer' | 'mention'> => Object.fromEntries(picked.map((a) => [a, mode(a)]))
-  const changed = picked.length !== members.length || picked.some((a) => !members.includes(a)) || picked.some((a) => mode(a) !== (modes?.[a] ?? 'answer'))
+  const changed = picked.length !== members.length || picked.some((a) => !members.includes(a))
   // Archived agents can't be shown, so they don't show up in the count either (they stay picked: saving keeps them in the channel).
   const inRoom = picked.filter((a) => agents.some((x) => x.id === a))
-  const answering = inRoom.filter((a) => mode(a) === 'answer').length
   return (
     <Modal title={L(`Agentes em #${name}`, `Agents in #${name}`)} onClose={onClose}>
-      <p className="muted small modal__lead">{L('Quem está no canal lê a conversa. Escolha quem responde normalmente e quem só responde quando mentioned.', 'Everyone in the channel reads it. Choose who answers normally and who answers only when mentioned.')}</p>
+      <p className="muted small modal__lead">{L('Quem está no canal lê a conversa e pode responder. Pra chamar alguém específico, use @.', 'Whoever is in the channel reads the conversation and can reply. To call on someone specific, use @.')}</p>
       <div className="member-list">
         {agents.map((a) => {
           const on = picked.includes(a.id)
           return (
-            <div key={a.id} className={`member ${on ? 'is-on' : ''}`}>
-              <button type="button" className="member__pick grow" aria-pressed={on} onClick={() => toggle(a.id)}>
-                <AgentAvatar agent={a} size={28} />
-                <span className="member__text grow">
-                  <strong>{a.name}</strong>
-                  <span className="muted small">
-                    @{a.handle}
-                    {a.role ? ` · ${a.role}` : ''}
-                  </span>
+            <button key={a.id} className={`member ${on ? 'is-on' : ''}`} onClick={() => toggle(a.id)}>
+              <AgentAvatar agent={a} size={28} />
+              <span className="member__text grow">
+                <strong>{a.name}</strong>
+                <span className="muted small">
+                  @{a.handle}
+                  {a.role ? ` · ${a.role}` : ''}
                 </span>
-              </button>
-              <label className="member__mode">
-                <span className="sr-only">{L(`Como ${a.name} responde`, `How ${a.name} answers`)}</span>
-                <select
-                  aria-label={L(`Como ${a.name} responde`, `How ${a.name} answers`)}
-                  value={mode(a.id)}
-                  onChange={(e) => setChosen({ ...chosen, [a.id]: e.target.value === 'mention' ? 'mention' : 'answer' })}
-                >
-                  <option value="answer">{L('Responde', 'Answers')}</option>
-                  <option value="mention">{L('Só se mencionado', 'Only if mentioned')}</option>
-                </select>
-              </label>
-            </div>
+              </span>
+              <span className="member__check">{on && <Icon name="check" size={13} />}</span>
+            </button>
           )
         })}
       </div>
       {error && <p className="field__error">{error}</p>}
       <footer className="modal__foot">
         <span className="muted small">
-          {answering} {answering === 1 ? L('agente responde', 'agent answers') : L('agentes respondem', 'agents answer')}
+          {inRoom.length} {inRoom.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}
         </span>
         <button className="btn btn--ghost btn--sm" onClick={onClose}>
           {L('Cancelar', 'Cancel')}
         </button>
-        <button className="btn btn--primary btn--sm" disabled={!changed} onClick={() => setChannelMembers(id, picked, saveModes()).then(onClose, (e: unknown) => setError(message(e)))}>
+        <button className="btn btn--primary btn--sm" disabled={!changed} onClick={() => setChannelMembers(id, picked).then(onClose, (e: unknown) => setError(message(e)))}>
           {L('Salvar', 'Save')}
         </button>
       </footer>
