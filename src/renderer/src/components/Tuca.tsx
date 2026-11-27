@@ -5,6 +5,7 @@
 // (Settings.tucaApplyNow): its card is then a receipt of what was done, with
 // Desfazer for a while; what grants access stays a card to confirm.
 import { L } from '../../../shared/lang'
+import { onlyAccessChanges, type LentFolder } from '../../../shared/types'
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import {
   ENGINES,
@@ -37,6 +38,7 @@ import {
   undoProposal,
   undoProposals,
   UNDO_HOURS,
+  windowless,
   type UndoInfo
 } from '../store'
 import { AgentAvatar, Icon, monthlyLimitText } from './ui'
@@ -212,6 +214,8 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
   const connectors = useStore((s) => s.connectors)
   const conversations = useStore((s) => s.conversations)
   const replaced = useStore((s) => replacedLater(s, message, p))
+  const platform = useStore((s) => s.platform)
+  const server = windowless()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [sent, setSent] = useState('')
@@ -229,12 +233,17 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
     return agents.some((a) => !a.archived && a.kind !== 'tuca' && same(a.name)) ? 'team' : 'missing'
   }
   // A card left from a change the app split: only what grants access, waiting to be confirmed.
-  const accessOnly = p.kind === 'agent' && Object.keys(p.changes).every((k) => k === 'grants' || k === 'limit')
+  const accessOnly = p.kind === 'agent' && onlyAccessChanges(p.changes)
   const missing = (p.needs ?? []).filter((n) => source(n) === 'missing')
   const fromReply = (p.needs ?? []).filter((n) => source(n) === 'reply')
   const by = (message.author.kind === 'agent' && agentOf(message.author.id)?.name) || 'Tuca'
   const grantList = (g: Record<string, string>): string =>
     Object.entries(g).map(([id, level]) => `${connectors.find((c) => c.id === id)?.name ?? L('conector', 'connector')} (${level === 'read_write' ? L('leitura e escrita', 'read and write') : L('leitura', 'read')})`).join(', ') || L('nenhum', 'none')
+  // "mac" is right on the machine the app runs on: this Mac, this computer, or the server (Tucano Pro), as the agent page names it.
+  const here: 'mac' | 'computer' | 'server' = server ? 'server' : platform === 'mac' ? 'mac' : 'computer'
+  const directly = here === 'server' ? L('direto no servidor', 'right on the server') : here === 'mac' ? L('este Mac (roda como você)', 'this Mac (runs as you)') : L('este computador (roda como você)', 'this computer (runs as you)')
+  const computerText = (on: boolean | undefined, kind: Agent['computerKind']): string => (!on ? L('nenhum', 'none') : kind === 'mac' ? directly : L('Linux isolado', 'isolated Linux'))
+  const folderList = (fs: LentFolder[]): string => fs.map((f) => `${f.path.replace(/^\/(Users|home)\/[^/]+/, '~')} (${f.readOnly ? L('leitura', 'read') : L('leitura e escrita', 'read and write')})`).join(', ') || L('nenhuma', 'none')
   const modelName = (id: string): string => {
     const m = modelInfo(id)
     return m ? `${ENGINES[m.engine].label} · ${m.label}` : id
@@ -274,7 +283,13 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
       if (c.grants !== undefined) rows.push([L('Conectores', 'Connectors'), grantList(was.grants ?? {}), grantList(c.grants)])
       // 0 is no limit, so the card says that instead of a figure that reads as "set it to zero".
       if (c.limit !== undefined) rows.push([L('Limite do mês', "Month's limit"), monthlyLimitText(was.limit ?? agent.limit), monthlyLimitText(c.limit)])
+      // A computer, a browser and folders, said plainly: what each lets the agent do.
+      if (c.computer !== undefined || c.computerKind !== undefined)
+        rows.push([L('Computador', 'Computer'), computerText(was.computer ?? agent.computer, was.computerKind ?? agent.computerKind), computerText(c.computer ?? agent.computer, c.computerKind ?? agent.computerKind)])
+      if (c.browser !== undefined) rows.push([L('Navegador', 'Browser'), was.browser ? L('ligado', 'on') : L('desligado', 'off'), c.browser ? L('ligado', 'on') : L('desligado', 'off')])
+      if (c.folders !== undefined) rows.push([L('Pastas', 'Folders'), folderList(was.folders ?? []), folderList(c.folders)])
     }
+    const onMac = (c.computer ?? agent?.computer) === true && (c.computerKind ?? agent?.computerKind) === 'mac' && (c.computer !== undefined || c.computerKind !== undefined)
     head = (
       <>
         {agent && <AgentAvatar agent={agent} size={40} />}
@@ -297,6 +312,14 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
               </div>
             ))}
           </div>
+        )}
+        {onMac && !p.state && here !== 'server' && (
+          <p className="hint proposal__risk">
+            <Icon name="shield" size={12} />{' '}
+            {here === 'mac'
+              ? L('No Mac, o agente roda como você: vê e muda seus arquivos e usa os programas daqui. Se não precisar de algo que só existe neste Mac, prefira o Linux isolado.', 'On the Mac the agent runs as you: it sees and changes your files and uses the programs here. Unless it needs something only this Mac has, prefer the isolated Linux.')
+              : L('Direto no computador, o agente roda como você: vê e muda seus arquivos e usa os programas daqui. Se não precisar de algo que só existe neste computador, prefira o Linux isolado.', 'Right on the computer the agent runs as you: it sees and changes your files and uses the programs here. Unless it needs something only this computer has, prefer the isolated Linux.')}
+          </p>
         )}
         {c.instructions !== undefined && (
           <>
@@ -412,7 +435,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
   // What was done, in the first person, once it applied by itself: the card is its receipt.
   const receipt = (): string => {
     if (p.kind === 'agent') {
-      const FIELDS: Record<string, string> = { name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit'), fallbackModelId: L('modelo reserva', 'reserve model') }
+      const FIELDS: Record<string, string> = { name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit'), computer: L('computador', 'computer'), computerKind: L('computador', 'computer'), browser: L('navegador', 'browser'), folders: L('pastas', 'folders'), fallbackModelId: L('modelo reserva', 'reserve model') }
       return L(`Mudei ${agentOf(p.agentId)?.name ?? 'o agente'}: ${Object.keys(p.changes).map((k) => FIELDS[k] ?? k).join(', ')}.`, `I changed ${agentOf(p.agentId)?.name ?? 'the agent'}: ${Object.keys(p.changes).map((k) => FIELDS[k] ?? k).join(', ')}.`)
     }
     if (p.kind === 'routine') return L(`Criei a rotina “${p.routine.name}”.`, `I made the routine “${p.routine.name}”.`)
@@ -552,7 +575,7 @@ function ProposalGroup({ message, withDraft }: { message: Message; withDraft: bo
     }
   }
   const nameOf = (id: string): string => agents.find((a) => a.id === id)?.name ?? L('um agente', 'an agent')
-  const FIELDS = (): Record<string, string> => ({ name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit'), fallbackModelId: L('modelo reserva', 'reserve model') })
+  const FIELDS = (): Record<string, string> => ({ name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit'), computer: L('computador', 'computer'), computerKind: L('computador', 'computer'), browser: L('navegador', 'browser'), folders: L('pastas', 'folders'), fallbackModelId: L('modelo reserva', 'reserve model') })
   // One line per card, as "apply all" will do it.
   const line = (it: Item): string => {
     if (it.draft) return L(`Criar o agente ${draft!.name}`, `Create the agent ${draft!.name}`)

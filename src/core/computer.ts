@@ -89,6 +89,16 @@ export function lentWhereTheyAre(folders: readonly LentFolder[], opts: { home?: 
   })
 }
 
+// A folder an agent asks for on a card: "~/…" or a full path, checked as lending it would be.
+// Its real path, or why it can't be lent.
+export function folderToLend(raw: string, dataDir: string, home = homedir()): { path?: string; error?: string } {
+  const given = raw.trim()
+  const path = given === '~' ? home : given.startsWith('~/') ? join(home, given.slice(2)) : given
+  if (!path.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(path)) return { error: L(`"${given}": mande o caminho inteiro, como ~/Documentos/projeto.`, `"${given}": send the whole path, like ~/Documents/project.`) }
+  const why = checkFolder(path, { home, dataDir, named: true })
+  return why ? { error: why } : { path: realpathSync(path) }
+}
+
 // /projetos/<name>: the folder's name, made safe, and unique among the agent's folders.
 export function folderName(path: string, taken: string[]): string {
   const base = basename(path).toLowerCase().normalize('NFD').replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '') || 'pasta'

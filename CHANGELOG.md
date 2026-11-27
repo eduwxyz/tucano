@@ -4,6 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Novo:** um agente **pede o acesso que falta** (computador, navegador, uma pasta) num card na conversa, e você aprova ali, em vez de ele mandar você procurar nas configurações. Isso nunca entra sozinho, nem quando o Tuca aplica o resto na hora. Um computador direto na máquina vem com um aviso, e no Tucano Pro o agente pede o do servidor, já que lá não tem Linux isolado.
+
+### Added
+
+- **An agent asks for the access it lacks on a card.** An agent missing a computer, a browser or a folder could only tell the person to go find it in its settings. `propor_ajuste` now takes `computador` (`linux`, `mac` or `nenhum`), `navegador` and `pastas` (a path, read-only unless `escrita`), and agents are told to ask for themselves this way. These count as access, with connectors and the month's limit: they always wait for a click, even with the Tuca's apply-right-away. Folders follow the same rules as **Lend folder** (inside the home folder, no hidden folders, Library or Tucano's data), are checked again when applied and set apart from `saveAgent`; **Undo** puts them back. The card says what each lets the agent do and names the computer right on the machine as the agent page does (this Mac, this computer, the server), with a warning where the agent runs as the person. Where there is no isolated Linux (a server without Docker, as on Tucano Pro), the agent is told so and asks for the server's computer, and no folders. Thanks to Juliano Nicocelli.
+
 ## [0.2.51] - 2026-11-26
 
 > **Em português:**
