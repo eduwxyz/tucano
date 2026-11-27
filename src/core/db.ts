@@ -1378,6 +1378,13 @@ export class Db {
     this.db.prepare('UPDATE messages SET title = ? WHERE id = ?').run(title, id)
   }
 
+  // The name a reply's session was given when it started (src/core/titles.ts). Written into the run's own
+  // JSON here rather than through saveMessage: the reply is running, and a whole save would put back the
+  // status and the steps this row has moved on from.
+  setRunSessionName(id: string, name: string): void {
+    this.db.prepare("UPDATE messages SET run = json_set(run, '$.sessionName', ?) WHERE id = ? AND run IS NOT NULL").run(name, id)
+  }
+
   messages(): Message[] {
     return (this.db.prepare('SELECT * FROM messages ORDER BY at').all() as Row[]).map((r) => this.toMessage(r))
   }

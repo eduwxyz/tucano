@@ -4110,6 +4110,34 @@ export function SettingsPage(): ReactNode {
           </SectionAnchor>
         )}
 
+        {on('modelos') && admin && (
+          <SectionAnchor id="models-session-names" sections={structure}>
+            <Card title={L('Nomes das sessões', 'Session names')} section="models-session-names" lead={L('Um modelo pequeno dá um nome à resposta quando ela começa. O nome aparece no cabeçalho da mensagem e da thread.', 'A small model names a reply when it starts. The name appears in the message and thread headers.')}>
+              <Field label={L('Nomear sessões', 'Name sessions')} hint={L('Sem escolha, usa o modelo da memória. Desligado deixa as sessões sem nome.', 'With no model picked it uses the memory model. Off leaves sessions unnamed.')}>
+                <Select
+                  value={settings.sessionNameModel === 'off' ? 'off' : settings.sessionNameModel ? 'model' : 'memory'}
+                  onChange={(v) => {
+                    if (v === 'off') updateSettings({ sessionNameModel: 'off' })
+                    else if (v === 'memory') updateSettings({ sessionNameModel: null } as unknown as Partial<typeof settings>)
+                    else if (v === 'model') updateSettings({ sessionNameModel: settings.memoryModel })
+                  }}
+                  options={[
+                    { value: 'memory', label: L('Modelo da memória', 'Memory model') },
+                    { value: 'model', label: L('Escolher modelo', 'Choose a model') },
+                    { value: 'off', label: L('Desligado', 'Off') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
+              </Field>
+              {settings.sessionNameModel && settings.sessionNameModel !== 'off' && (
+                <Field label={L('Modelo dos nomes', 'Names model')} hint={L('Um nome por resposta, no começo.', 'One name per reply, when it starts.')}>
+                  <ModelSelect value={settings.sessionNameModel} onChange={(sessionNameModel) => updateSettings({ sessionNameModel })} />
+                </Field>
+              )}
+            </Card>
+          </SectionAnchor>
+        )}
+
         {/* ---------- Connections ---------- */}
         {on('conexoes') && owner && (
           <SectionAnchor id="connections-phone" sections={structure}>

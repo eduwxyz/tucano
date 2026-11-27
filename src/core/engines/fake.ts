@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { L, locale } from '../../shared/lang'
 import { memorySystem } from '../memory'
-import { titleSystem } from '../titles'
+import { sessionNameSystem, titleSystem } from '../titles'
 import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
 import { answerSystem, catalogSystem } from '../docs-brain'
@@ -66,6 +66,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (turn.system === titleSystem()) {
         // A request's title: its own words, short (the real one is a cheap model's).
         reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 40)
+      } else if (turn.system === sessionNameSystem()) {
+        // A session's name: the same words, a little shorter (2 to 5 of them).
+        reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 36)
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (turn.system === catalogSystem()) {

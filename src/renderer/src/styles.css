@@ -2290,6 +2290,17 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The name of the session comes first in a working row; the prompt still follows, on one line. */
+.work-row__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* A reply that ended: the glyph says how, and its row stays until the trash takes it off. */
 .work-row__state {
   display: inline-flex;
@@ -14546,6 +14557,39 @@ button.agent-card__now:hover {
 }
 .routine-tag.is-open .routine-tag__chev {
   transform: rotate(90deg);
+}
+/* A session's name rides in the head as a chip, like a routine's tag. It and the author's name give
+   way before the time does, so the head stays one line even in a narrow window. */
+.msg__head:has(.session-tag) {
+  align-items: center;
+}
+.msg__head:has(.session-tag) .msg__author {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg__head:has(.session-tag) .msg__time {
+  flex: none;
+}
+.session-tag {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(220px, 30vw);
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.session-tag__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .routine-ask {
   max-width: 600px;
