@@ -42,7 +42,7 @@ describe('the no-news phrase', () => {
 
 describe('a routine’s run, marked when it found nothing new', () => {
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready, qg: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   const agent: Agent = { id: 'a1', name: 'Bento', handle: 'bento', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false }
   const routine: Routine = { id: 'gh', name: 'Vigia do GitHub', agentId: 'a1', conversationId: 'd1', prompt: 'Olhe as issues novas do Tucano.', schedule: { days: [0, 1, 2, 3, 4, 5, 6], time: '09:00' }, enabled: true, createdAt: 1 }
   let db: Db
@@ -59,7 +59,7 @@ describe('a routine’s run, marked when it found nothing new', () => {
     const base = fakeEngine('claude', { delayMs: 1, reply: () => answer })
     const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }
     const other = (id: EngineId): Engine => fakeEngine(id, { delayMs: 1 })
-    const engines: Record<EngineId, Engine> = { claude, codex: other('codex'), opencode: other('opencode'), pi: other('pi'), antigravity: other('antigravity'), cursor: other('cursor'), grok: other('grok'), cline: other('cline'), hermes: other('hermes'), endpoint: other('endpoint') }
+    const engines: Record<EngineId, Engine> = { claude, codex: other('codex'), opencode: other('opencode'), pi: other('pi'), antigravity: other('antigravity'), cursor: other('cursor'), grok: other('grok'), cline: other('cline'), hermes: other('hermes'), endpoint: other('endpoint'), qg: other('qg') }
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')) })
   })
 

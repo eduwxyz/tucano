@@ -12,7 +12,7 @@ import { L, lang, locale, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'endpoint'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'endpoint' | 'qg'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -828,7 +828,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' },
   // No program to install: the app itself talks to an address in OpenAI's format (OpenRouter, OmniRoute,
   // Ollama, LM Studio, vLLM…) with a key, and runs each reply's tools itself (src/core/engines/endpoint.ts).
-  endpoint: { label: 'Endpoint', cli: '', login: '', install: '', site: 'https://openrouter.ai' }
+  endpoint: { label: 'Endpoint', cli: '', login: '', install: '', site: 'https://openrouter.ai' },
+  qg: { label: 'QG', cli: 'qg', login: 'qg login', install: 'npm install -g @quebragalho/cli', site: 'https://quebragalho.com.br' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

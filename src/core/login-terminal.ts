@@ -45,6 +45,8 @@ export function loginCommand(engine: EngineId): { args: string[]; env: Record<st
       return { args: [], env: {}, hint: L('Escreva /login e toque em Enter (de novo, se aparecer a lista de comandos); depois escolha o provedor com as setas.', 'Type /login and tap Enter (again, if the list of commands shows up); then pick the provider with the arrows.') }
     case 'endpoint':
       return { args: [], env: {} } // nothing to sign into: an address and a key, in Settings
+    case 'qg':
+      return { args: ['login'], env: {} }
   }
 }
 

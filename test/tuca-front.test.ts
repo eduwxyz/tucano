@@ -29,7 +29,7 @@ let tuca: Agent
 function runner(remembers = false): Runner {
   const fake = fakeEngine('claude', { delayMs: 1 })
   const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), fake.run(t)) }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint'), qg: fakeEngine('qg') }
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir, gateway, ...(remembers ? { memory: new Memories({ db, engines, settings: async () => settings, emit: () => {}, workDir }) } : {}) })
 }
