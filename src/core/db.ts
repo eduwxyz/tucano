@@ -723,6 +723,21 @@ const COLUMNS: [string, string, string][] = [
   ['connectors', 'icon', 'TEXT']
 ]
 
+// Every table and index a migration makes, read out of MIGRATIONS itself so the two cannot drift
+// ([name, the statement to run when it is missing]). Both spellings are in the list, plain CREATE and
+// CREATE IF NOT EXISTS, and both are kept: re-running one on a file that has what it makes does nothing.
+const TABLES: [string, string][] = MIGRATIONS.flatMap((sql) =>
+  [...sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?(\w+) \(([\s\S]*?)\n\s*\);/g)].map((m): [string, string] => [
+    m[1]!,
+    `CREATE TABLE IF NOT EXISTS ${m[1]} (${m[2]}\n  );`
+  ])
+)
+const INDEXES: [string, string][] = MIGRATIONS.flatMap((sql) =>
+  [...sql.matchAll(/CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?\w+ ON [^;]+;/g)].map((m): [string, string] => [
+    /INDEX (?:IF NOT EXISTS )?(\w+)/.exec(m[0])![1]!,
+    m[0].replace(/^CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?/, (all, uniq: string | undefined) => `CREATE ${uniq ?? ''}INDEX IF NOT EXISTS `)
+  ])
+)
 
 type Row = Record<string, unknown>
 
@@ -883,6 +898,11 @@ export class Db {
   private migrate(file: string): void {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
     this.created = user_version === 0
+    // A count past the list is a file that ran migrations this build no longer has, which a merge that
+    // dropped one (or a rollback) leaves behind: the counter is an index into MIGRATIONS, so from there
+    // every migration added later is skipped, silently, and the app starts without the tables its code
+    // reads. Say it, then make what the list declares, below.
+    if (user_version > MIGRATIONS.length) console.error(`[db] the file is at schema ${user_version}; this build has ${MIGRATIONS.length} migrations`)
     // A copy from before the update, among the daily ones (and pruned with them).
     if (user_version > 0 && user_version < MIGRATIONS.length && file !== ':memory:') {
       const backups = join(dirname(file), 'backups')
@@ -895,9 +915,21 @@ export class Db {
         this.db.exec(`PRAGMA user_version = ${v + 1}`)
       })
     }
+    // The table a skipped migration makes, made anyway: the columns below already work this way, and a
+    // table can't be waited for — every read of it fails, at the first reply rather than at the start.
+    for (const [table, make] of TABLES) {
+      if ((this.db.prepare(`PRAGMA table_info(${table})`).all() as unknown[]).length) continue
+      this.tx(() => this.db.exec(make))
+    }
     for (const [table, column, type] of COLUMNS) {
       const has = (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column)
       if (!has) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+    }
+    // And the index whose migration was skipped, once its table and columns are there: a missing one
+    // costs a scan, not a failure, so it goes last.
+    for (const [name, make] of INDEXES) {
+      if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(name)) continue
+      this.db.exec(make)
     }
     // A monthly limit too large to read back as a number (written before limits were checked, by
     // someone meaning "no limit") makes every read of the agents fail, and the workspace doesn't
