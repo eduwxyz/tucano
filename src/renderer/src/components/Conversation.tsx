@@ -1795,12 +1795,15 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
     setSteerOpen(false)
     setSteerNote('')
   }
-  const open = toggled ?? (working && stepsOpen)
+  // A routine with nothing to report is one quiet line, closed: what it did is a click away, and
+  // the reply itself has no text at all.
+  const silent = run.silent === true
+  const open = toggled ?? (working && stepsOpen && !silent)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
 
-  if (run.steps.length === 0 && !working) return null
+  if (run.steps.length === 0 && !working && !silent) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
   const failed = run.steps.filter((st) => st.status === 'error').length
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
@@ -1832,9 +1835,15 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
             </span>
           ) : (
             <span className="steps__summary">
-              {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
-              {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
-              {total > 0 && ` · ${duration(total)}`}
+              {/* A routine that had nothing to report says so here, and nowhere else. */}
+              {silent && `${L('Nada a informar', 'Nothing to report')}${run.steps.length ? ' · ' : ''}`}
+              {!silent && run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
+              {run.steps.length > 0 && (
+                <>
+                  {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
+                  {total > 0 && ` · ${duration(total)}`}
+                </>
+              )}
             </span>
           )}
           {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
@@ -1853,8 +1862,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
           )}
         </button>
         {/* One row of pills under the chain, not one row per control: the steer opens here, and the
-            pause pill of a held reply joins the same row instead of drawing a second one. */}
-        {working && (
+            pause pill of a held reply joins the same row instead of drawing a second one. */}        {working && (
           <div className="steps__pills">
             <span
               className="steps__steer-pill"

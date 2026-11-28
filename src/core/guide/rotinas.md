@@ -1,7 +1,7 @@
 # Rotinas
 > Um agente trabalhando sozinho: num horário, quando aparece algo novo num conector, ou quando chamado neste computador.
 
-Uma rotina é um pedido que o app manda pra um agente sozinho, numa DM ou num canal em que ele está. A resposta aparece na conversa, marcada como rotina.
+Uma rotina é um pedido que o app manda pra um agente sozinho, numa DM ou num canal em que ele está; a resposta aparece na conversa, marcada como rotina. Sem nada a contar, ele responde só **[SILENT]**: fica uma linha discreta, *Nada a informar*, sem notificação nem marca de não lida.
 
 ## Criar
 1. Em **Rotinas** (um calendário da semana), clique num horário ou em **Nova rotina** (N).
@@ -31,6 +31,6 @@ Clique numa rotina pra ver **Rodou** / **Vai rodar**, **Rodar agora**, **Ver a r
 - Cada agente tem um máximo de rotinas ligadas (**Máx. rotinas ligadas** na página dele, 10 por padrão).
 
 ## Quando dá errado
-- Não rodou: o app estava fechado por mais de 12 h, estava em horário de silêncio, os agentes estavam pausados, ou o agente está arquivado (arquivar desliga as rotinas).
+- Não rodou: app fechado por mais de 12 h, horário de silêncio, agentes pausados, ou agente arquivado (arquivar desliga as rotinas).
 - "Não deu pra ler o conector": o conector está desconectado ou pede login (veja **conectores**).
 - Ficou esperando aprovação: decida em **Aprovações** ou pelo Telegram.

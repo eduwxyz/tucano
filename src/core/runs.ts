@@ -41,6 +41,7 @@ import { sessionConfig, Sessions, type SessionPlan, type Shown } from './session
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
 import { JEV_MODEL, routeJev } from './jev'
+import { silentOf } from '../shared/silent'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -1181,10 +1182,9 @@ export class Runner {
         `${me} pode não estar olhando agora: faça o que a última mensagem pede, do começo ao fim, e responda com o resultado. Só pergunte se for impossível continuar sem ${me}.`,
         `${me} may not be looking right now: do what the last message asks, start to finish, and reply with the result. Only ask if it's impossible to go on without ${me}.`
       ),
-      // The app folds these runs into one line by this exact phrase (src/shared/routine-news.ts).
       L(
-        `Se não houver nada novo pra contar (nada mudou, nada pra fazer), responda só "${noNewsPhrase()}", sem mais nada.`,
-        `If there's nothing new to report (nothing changed, nothing to do), reply only "${noNewsPhrase()}", with nothing else.`
+        `Se, ao terminar, não houver nada que valha contar a ${me} — porque nada mudou, nada atrasou, nada chegou, ou está tudo como ${me} deixou —, responda só [SILENT], sozinho, sem mais nenhuma palavra: aí o app não te mostra como resposta, não notifica e não marca a conversa como não lida. Isso é legítimo, e é o certo quando a rotina não trouxe nada. Não use quando houver qualquer coisa que ${me} precise saber, mesmo pequena, nem junto de um texto: ou você tem o que contar, e conta, ou responde só [SILENT].`,
+        `If, when you finish, there is nothing worth telling ${me} — because nothing changed, nothing is late, nothing came in, or everything is as ${me} left it —, answer exactly [SILENT], alone, with no other word: the app then doesn't show you as a reply, doesn't notify and doesn't mark the conversation unread. That's a legitimate outcome, and the right one when the routine brought nothing. Don't use it when there is anything ${me} needs to know, however small, and not alongside text: either you have something to tell, and tell it, or you answer just [SILENT].`
       ),
       event &&
         L(
@@ -2411,7 +2411,7 @@ ${note}`,
               failures: db.recentFailures(now - 7 * 24 * 3_600_000).filter((m) => seen.canSeeFrom(requester, m.conversationId)),
               lastRun: (r) => {
                 const run = r.lastMessageId ? db.message(r.lastMessageId)?.run : undefined
-                return run && { status: run.status, ...(run.error ? { error: run.error } : {}) }
+                return run && { status: run.status, ...(run.error ? { error: run.error } : {}), ...(run.silent ? { silent: true as const } : {}) }
               },
               now
             })
@@ -3585,20 +3585,32 @@ ${note}`,
       const up = question && handedNow && askedTo.id === requester.id ? handedNow : undefined
       if (question && !up) this.asked(agent, msg, question, askedTo, requester, confirming, settings)
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
-      const text = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
+      const spoken = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
+      // A routine that found nothing to report answers with the marker: what it says then is nothing
+      // at all, and nobody is told. Anything the run brought that stands on its own — a question, an
+      // approval, a file, a card, a service, a next-steps card — is not silence, so the marker only
+      // silences a reply with nothing else on it.
+      const quiet = opts.routine ? silentOf(spoken) : { silent: false, text: spoken }
       // A card of next steps goes on a reply that's done: it asks nothing of anyone, so it's no question,
       // no inbox item and no slot. An approval or a question in the same turn is what counts instead.
       const carded = !!proposed && !questions && !waiting
       const card = carded ? { questions: [proposed!], stepsOpen: true as const, ...(db.people().length > 1 ? { askedTo: requester.id } : {}) } : {}
-      const run: Run = { ...base, ...card, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+      const alone = !approval && !question && !questions && !carded && !artifactIds.length && !services.length && !msg.run?.agentDraft && !msg.run?.proposal && !msg.run?.proposals?.length
+      const silent = quiet.silent && alone
+      const run: Run = { ...base, ...card, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')), ...(silent ? { silent: true as const } : {}) }
+      // The run already made itself unread while it was working: a reply with nothing to say takes that back.
+      if (silent) db.forgetActivity(msg.id)
       // The new card and the closing of the one it replaces are written together: a restart finds one open, never two.
       const replaced = db.tx(() => {
         const closed = carded ? this.closeOpenSteps(agent.id, msg) : []
-        // A routine's run that answered only the no-news phrase is marked, so the conversation folds it.
-        save({ text, run: routineAskId && noNewsRun(text, run) ? { ...run, noNews: true } : run })
+        save({ text: quiet.text, run: routineAskId && noNewsRun(quiet.text, run) ? { ...run, noNews: true } : run })
         return closed
       })
       for (const old of replaced) emit({ type: 'message', message: old })
+      if (silent) {
+        const back = db.conversation(conv.id)
+        if (back) emit({ type: 'conversation', conversation: back }) // the badge in the sidebar is a count again
+      }
       // What the Tuca proposed inside the app goes in now, for the person he worked for (applyNow checks
       // what they may do); what grants access stays a card.
       // Something going wrong there leaves the cards as cards: never the reply.
