@@ -4,6 +4,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.54] - 2026-11-28
+
+> **Em português:**
+> - **Novo:** a **Maritaca** entra nos atalhos do **Endpoint próprio** (Configurações › Modelos), do lado de OpenRouter, Ollama e LM Studio. Um clique preenche o endereço e diz onde pegar a chave (plataforma.maritaca.ai › Chaves de API) e qual modelo usar: **S5** pros agentes, **S5-br-sp** pra tudo rodar no Brasil.
+
 ### Added
 
 - **Maritaca among the endpoint shortcuts.** Settings › Models › Your own endpoint now offers **Maritaca**, the Brazilian provider of the Sabiá and S5 models, beside OpenRouter, Ollama and LM Studio. It fills in `https://chat.maritaca.ai/api` and says where the key comes from (plataforma.maritaca.ai › API keys) and which model to pick: S5 for agents, S5-br-sp to keep everything in Brazil. Maritaca speaks OpenAI's format with tool calls, so agents ran on it before; this saves looking up the address. In a test with 60-odd tools, S5 carried a five-step task through on its own; S5-nano lost its way among that many.
