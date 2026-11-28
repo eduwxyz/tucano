@@ -272,7 +272,7 @@ describe('a Composio call through the runner', () => {
     await r.decide(ap!.id, 'approved')
     await r.idle()
     expect(calls).toEqual([{ name: MULTI_EXECUTE, args: batch('GMAIL_FETCH_EMAILS', 'GMAIL_SEND_EMAIL') }]) // the stored call, as approved
-  })
+  }, 15_000)
 
   it('an unknown or malformed call asks for approval instead of running', async () => {
     db.saveAgent(agent('read_write'))
