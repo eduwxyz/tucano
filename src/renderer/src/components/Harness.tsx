@@ -341,9 +341,27 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
   )
 }
 
-// Shortcuts for the address: a provider's, or a local server's on its usual port.
-const ENDPOINT_PRESETS: { label: string; url: string }[] = [
+// Shortcuts for the address: a provider's, or a local server's on its usual port. A provider that
+// people meet here for the first time says where its key comes from and which model to pick.
+type EndpointPreset = { label: string; url: string; note?: () => ReactNode }
+const ENDPOINT_PRESETS: EndpointPreset[] = [
   { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+  {
+    label: 'Maritaca',
+    url: 'https://chat.maritaca.ai/api',
+    note: () => (
+      <>
+        {L('Modelos brasileiros da Maritaca. A chave sai em ', 'Brazilian models by Maritaca. Get a key at ')}
+        <button type="button" className="link" onClick={() => openExternal('https://plataforma.maritaca.ai/')}>
+          plataforma.maritaca.ai
+        </button>
+        {L(
+          ' › Chaves de API. Pros agentes, use o S5; o S5-br-sp roda todo no Brasil.',
+          ' › API keys. For agents, use S5; S5-br-sp runs entirely in Brazil.'
+        )}
+      </>
+    )
+  },
   { label: 'Ollama', url: 'http://localhost:11434/v1' },
   { label: 'LM Studio', url: 'http://localhost:1234/v1' }
 ]
@@ -396,6 +414,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
   }
   const shown = (listed ?? []).filter((m) => m.toLowerCase().includes(filter.trim().toLowerCase())).slice(0, 300)
   const flip = (m: string): void => setChosen((c) => (c.includes(m) ? c.filter((x) => x !== m) : [...c, m]))
+  const note = ENDPOINT_PRESETS.find((p) => p.url === url.trim().replace(/\/+$/, ''))?.note
 
   return (
     <div className={`harness ${picked ? 'is-picked' : ''}`}>
@@ -405,7 +424,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
         </button>
         <label className="grow harness__name" htmlFor={checkId}>
           <strong>{L('Endpoint próprio', 'Your own endpoint')}</strong>
-          <span className="harness__account">{st.installed ? st.account : L('OpenRouter, OmniRoute, Ollama… sem instalar nada', 'OpenRouter, OmniRoute, Ollama… nothing to install')}</span>
+          <span className="harness__account">{st.installed ? st.account : L('OpenRouter, Maritaca, Ollama… sem instalar nada', 'OpenRouter, Maritaca, Ollama… nothing to install')}</span>
         </label>
         {st.installed && <span className="tag tag--ok">endpoint</span>}
         {picked && st.loggedIn && !open && (
@@ -432,6 +451,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
               </button>
             ))}
           </div>
+          {note && <p className="hint"><span>{note()}</span></p>}
           <label className="field">
             <span className="field__label">{L('Endereço', 'Address')}</span>
             <input value={url} spellCheck={false} placeholder="https://openrouter.ai/api/v1" onChange={(e) => setUrl(e.target.value)} />

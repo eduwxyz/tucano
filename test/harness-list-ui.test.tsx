@@ -123,3 +123,35 @@ describe('picked harnesses that cannot run', () => {
     expect(check('Pi').classList.contains('is-on')).toBe(false)
   })
 })
+
+describe('the endpoint shortcuts', () => {
+  const click = async (el: Element): Promise<void> => {
+    await act(async () => { el.dispatchEvent(new window.Event('click', { bubbles: true })) })
+  }
+  const button = (text: string): HTMLButtonElement => {
+    const b = [...document.querySelectorAll<HTMLButtonElement>('.harness button')].find((x) => x.textContent === text)
+    if (!b) throw new Error(`no button ${text}`)
+    return b
+  }
+  const address = (): HTMLInputElement => document.querySelector<HTMLInputElement>('.endpoint .field input:not([type=password])')!
+
+  it('fills in Maritaca’s address and says where its key comes from and which model to pick', async () => {
+    const { openExternal } = await import('../src/renderer/src/store')
+    state.settings.engines = statuses({ endpoint: { installed: false, loggedIn: false } })
+    state.settings.harnesses = []
+    await render()
+    expect(document.body.textContent).toContain('OpenRouter, Maritaca, Ollama… nothing to install')
+    await click(button('Set up'))
+    expect(document.body.textContent).not.toContain('Brazilian models by Maritaca')
+    await click(button('Maritaca'))
+    expect(address().value).toBe('https://chat.maritaca.ai/api')
+    expect(button('Maritaca').classList.contains('is-on')).toBe(true)
+    const note = document.querySelector('.endpoint .hint span')
+    expect(note?.textContent).toBe('Brazilian models by Maritaca. Get a key at plataforma.maritaca.ai › API keys. For agents, use S5; S5-br-sp runs entirely in Brazil.')
+    await click(button('plataforma.maritaca.ai'))
+    expect(openExternal).toHaveBeenCalledWith('https://plataforma.maritaca.ai/')
+    await click(button('OpenRouter'))
+    expect(address().value).toBe('https://openrouter.ai/api/v1')
+    expect(document.body.textContent).not.toContain('Brazilian models by Maritaca')
+  })
+})
