@@ -19,6 +19,7 @@ export function workspaceId(): string {
 interface Registry {
   version: 1
   theme?: Settings['theme']
+  omarchy?: boolean // the window follows the Omarchy desktop's colours (this computer's, not a workspace's)
   selected: string
   workspaces: Workspace[]
 }
@@ -49,6 +50,7 @@ export class Workspaces {
     const r = raw as Registry
     if (r.version !== 1 || !Array.isArray(r.workspaces) || !r.workspaces.length) fail()
     if (r.theme !== undefined && !isTheme(r.theme)) fail()
+    if (r.omarchy !== undefined && typeof r.omarchy !== 'boolean') fail()
     const managed = join(this.root, 'workspaces')
     if (existsSync(managed) && realpathSync(managed) !== managed) fail()
     const ids = new Set<string>()
@@ -79,6 +81,10 @@ export class Workspaces {
   theme(): Settings['theme'] | undefined { return this.state.theme }
   setTheme(theme: Settings['theme']): void {
     if (theme !== this.state.theme) this.save({ ...this.state, theme })
+  }
+  omarchy(): boolean { return this.state.omarchy === true }
+  setOmarchy(on: boolean): void {
+    if (on !== this.omarchy()) this.save({ ...this.state, omarchy: on })
   }
   selected(): Workspace { return this.get(this.state.selected) }
   get(id: string): Workspace {

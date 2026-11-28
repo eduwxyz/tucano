@@ -27,6 +27,7 @@ import { WhatsNew } from './components/Update'
 import { CoreDown, Toasts } from './components/Toast'
 import { Icon } from './components/ui'
 import { NameModal } from './components/People'
+import { paintOmarchy, useOmarchy } from './omarchy'
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
@@ -38,6 +39,7 @@ export function App(): ReactNode {
   const mac = useStore((s) => s.platform === 'mac') || window.tucano?.places?.os === 'darwin'
   const navOpen = useStore((s) => s.navOpen)
   const tab = hubTab(view)
+  const omarchy = useOmarchy()
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'pt-BR'
@@ -47,10 +49,7 @@ export function App(): ReactNode {
     document.documentElement.dataset['os'] = mac ? 'mac' : 'other'
   }, [mac])
 
-  useEffect(() => {
-    if (theme === 'system') delete document.documentElement.dataset['theme']
-    else document.documentElement.dataset['theme'] = theme
-  }, [theme])
+  useEffect(() => paintOmarchy(omarchy, theme), [omarchy, theme])
 
   // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings · ⌘[ back · ⌘] forward (Ctrl off a Mac)
   useEffect(() => {
