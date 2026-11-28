@@ -77,7 +77,7 @@ let registry: Workspaces
 // `wikiFolder`: the wiki's folder, as that core says (an Obsidian vault, say): the one folder outside the app's own it may open.
 type Runtime = { child: UtilityProcess; browsers: Browsers; ready: Promise<void>; summary: WorkspaceSummary; busy: boolean; wikiFolder: string }
 const cores = new Map<string, Runtime>()
-const workspaceList = (): WorkspaceList => ({ selected: registry.selected().id, workspaces: registry.list().map((w) => cores.get(w.id)?.summary ?? { id: w.id, name: w.name, isDefault: w.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }) })
+const workspaceList = (): WorkspaceList => ({ selected: registry.selected().id, workspaces: registry.list().map((w) => ({ ...(cores.get(w.id)?.summary ?? { id: w.id, name: w.name, isDefault: w.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' as const }), picture: w.picture })) })
 const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()); tellPlaces() }
 // A server's page in this window lists this computer's workspaces and the servers in its own menu
 // (src/preload/server.ts): told when their names or which is on screen change, it asks again.
@@ -546,6 +546,14 @@ ipcMain.handle('home-phone:state', (event) => (fromApp(event) ? phone?.state() :
 ipcMain.handle('home-phone:set', (event, on: unknown) => (fromApp(event) && typeof on === 'boolean' ? phone?.set(on) : undefined))
 ipcMain.handle('home-phone:code', (event) => (fromApp(event) ? phone?.code() : undefined))
 ipcMain.handle('workspaces:list', (event) => { trustedWorkspaceRequest(event); return workspaceList() })
+// A workspace's own picture, kept in its registry entry so a backup carries it. The registry's
+// setter validates the image and the address again, whatever the page sends.
+ipcMain.handle('workspaces:setPicture', (event, id: unknown, picture: unknown) => {
+  trustedWorkspaceRequest(event)
+  if (typeof id !== 'string' || typeof picture !== 'string') throw new Error('Invalid workspace picture request')
+  registry.setPicture(id, picture)
+  publishWorkspaces()
+})
 ipcMain.handle('workspaces:pause', async (event, paused: unknown, id?: unknown) => {
   trustedWorkspaceRequest(event)
   if (switching) throw new Error('Wait for the workspace operation')
@@ -584,6 +592,7 @@ ipcMain.handle('workspaces:duplicate', async (event, id: unknown, requestedName?
   if (typeof id !== 'string') throw new Error('Invalid workspace')
   if (requestedName !== undefined && (typeof requestedName !== 'string' || !requestedName.trim() || requestedName.trim().length > 120)) throw new Error(L('Dê um nome ao workspace, com até 120 caracteres.', 'Give the workspace a name, up to 120 characters.'))
   const source = registry.get(id)
+  const carried = parts === undefined ? undefined : workspaceParts(parts)
   switching = true
   let target: Workspace | undefined
   try {
@@ -591,8 +600,11 @@ ipcMain.handle('workspaces:duplicate', async (event, id: unknown, requestedName?
     await runtime.ready
     const name = typeof requestedName === 'string' ? requestedName.trim() : suggestWorkspaceCopyName(source.name, registry.list().map((w) => w.name))
     target = registry.create(name)
-    await requestWorkspace(runtime, { type: 'duplicate-workspace', targetDir: target.dataDir, name: target.name, ...(parts !== undefined ? { parts: workspaceParts(parts) } : {}) }, 'workspace-duplicated')
+    await requestWorkspace(runtime, { type: 'duplicate-workspace', targetDir: target.dataDir, name: target.name, ...(carried ? { parts: carried } : {}) }, 'workspace-duplicated')
     await startCore(target).ready
+    // The picture goes with General settings, not on its own: an unchecked General leaves the copy
+    // with the neutral tile, the same way it leaves the source's name and language behind.
+    registry.copyPicture(source.id, target.id, carried)
     publishWorkspaces()
     return target.id
   } catch (error) {

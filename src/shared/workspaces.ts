@@ -32,6 +32,8 @@ export interface Workspace {
   webhookPort: number
   gitPort: number
   isDefault: boolean
+  // This workspace's own picture, as a data URL or a safe https address; unset is the default tile.
+  picture?: string
 }
 
 export interface WorkspaceSummary {
@@ -42,6 +44,7 @@ export interface WorkspaceSummary {
   unread: number
   approvals: number
   status: 'starting' | 'ready' | 'failed'
+  picture?: string
 }
 
 export interface WorkspaceList {

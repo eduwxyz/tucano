@@ -1,0 +1,10 @@
+Gates run in C:/Users/theap/orca/workspaces/tucano/avatar-image-pr at the commit in the approval packet.
+
+npm run typecheck                         exit 0, 0 type errors
+npx vitest run test/connector-icon-resize.test.ts test/workspace-picture-ui.test.tsx test/workspace-picture.test.ts test/server-places-ui.test.tsx test/connector-icon-tile.test.tsx
+                                          exit 0, 5 files passed, 32 tests passed
+npm run build                             exit 0, renderer + main + preload built
+node scripts/screens-workspace-picture.mjs frames/avatar-polish
+                                          exit 0, 12 frames, 0 page errors
+
+No full-suite claim: only the focused files above were run.

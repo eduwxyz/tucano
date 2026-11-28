@@ -7,6 +7,9 @@ import { L } from '../../shared/lang'
 // is meant to be a logo in a document. Small on purpose: the connector list travels to the phone and
 // goes out on every change, so a picture is a few kilobytes, never a photo.
 export const ICON_PX = 96
+// A noisy 96 px PNG can still be too long for the stored string. Try smaller ceilings, in order,
+// before giving up: a mark stays recognizable at 16 px, and the store never gets an oversized value.
+export const ICON_PX_STEPS = [ICON_PX, 80, 64, 48, 32, 16] as const
 // A picture over this, before shrinking, is not a logo anyone picked on purpose (a photo, a screenshot).
 const MAX_FILE_BYTES = 4 * 1024 * 1024
 // Must stay in step with ICON_MAX_CHARS in src/core/connectors.ts, which refuses anything longer.
@@ -15,13 +18,31 @@ const MAX_DATA_CHARS = 32_000
 // Whether a connector's icon is a picture (and not the empty string that goes back to the default).
 export const isIconData = (value?: string): boolean => !!value && value.startsWith('data:image/')
 
-// The image a person picked, ready to be stored: a 96 px PNG for a bitmap, the SVG itself for an SVG.
+// The image a person picked, ready to be stored: a PNG for a bitmap, the SVG itself for an SVG.
+// A bitmap that does not fit at one ceiling is redrawn smaller, so a noisy picture can still be kept.
 export async function iconFromFile(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error(L('Escolha um arquivo de imagem.', 'Pick an image file.'))
   if (file.size > MAX_FILE_BYTES) throw new Error(L('Essa imagem tem mais de 4 MB. Escolha uma menor.', 'That image is over 4 MB. Pick a smaller one.'))
-  const data = file.type === 'image/svg+xml' ? await svgIcon(file) : await shrunkIcon(file)
-  if (data.length > MAX_DATA_CHARS) throw new Error(L('A imagem ficou grande demais para um ícone. Escolha uma menor.', 'That image is too big for an icon. Pick a smaller one.'))
-  return data
+  if (file.type === 'image/svg+xml') {
+    const data = await svgIcon(file)
+    if (data.length > MAX_DATA_CHARS) throw new Error(L('A imagem ficou grande demais para um ícone. Escolha uma menor.', 'That image is too big for an icon. Pick a smaller one.'))
+    return data
+  }
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(file)
+  } catch {
+    throw new Error(L('Não consegui ler essa imagem. Tente um PNG ou um JPEG.', "I couldn't read that image. Try a PNG or a JPEG."))
+  }
+  try {
+    for (const px of ICON_PX_STEPS) {
+      const data = shrunkBitmap(bitmap, px)
+      if (data.length <= MAX_DATA_CHARS) return data
+    }
+    throw new Error(L('A imagem ficou grande demais para um ícone. Escolha uma menor.', 'That image is too big for an icon. Pick a smaller one.'))
+  } finally {
+    bitmap.close()
+  }
 }
 
 // Base64 (what the main process hands over) as the file the picker already knows how to shrink.
@@ -64,16 +85,10 @@ async function svgIcon(file: File): Promise<string> {
   return `data:image/svg+xml;base64,${utf8Base64(text)}`
 }
 
-// A bitmap: drawn at 128 px on its longest side, on a transparent canvas (so a mark with soft edges
+// A bitmap: drawn on a transparent canvas at the ceiling's longest side (so a mark with soft edges
 // keeps them), and given back as a PNG.
-async function shrunkIcon(file: File): Promise<string> {
-  let bitmap: ImageBitmap
-  try {
-    bitmap = await createImageBitmap(file)
-  } catch {
-    throw new Error(L('Não consegui ler essa imagem. Tente um PNG ou um JPEG.', "I couldn't read that image. Try a PNG or a JPEG."))
-  }
-  const scale = Math.min(1, ICON_PX / Math.max(bitmap.width, bitmap.height))
+function shrunkBitmap(bitmap: ImageBitmap, px: number): string {
+  const scale = Math.min(1, px / Math.max(bitmap.width, bitmap.height))
   const width = Math.max(1, Math.round(bitmap.width * scale))
   const height = Math.max(1, Math.round(bitmap.height * scale))
   const canvas = document.createElement('canvas')
@@ -82,7 +97,6 @@ async function shrunkIcon(file: File): Promise<string> {
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error(L('Não consegui preparar a imagem.', "I couldn't prepare the image."))
   ctx.drawImage(bitmap, 0, 0, width, height)
-  bitmap.close()
   return canvas.toDataURL('image/png')
 }
 
