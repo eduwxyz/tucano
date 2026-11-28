@@ -6338,6 +6338,10 @@ table.csv th {
   background: var(--accent);
   border-color: var(--accent);
 }
+.composer-silent {
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
 .stack__add {
   margin-left: 2px;
 }

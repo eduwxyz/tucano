@@ -7,10 +7,12 @@ import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
 import { answerSystem, catalogSystem } from '../docs-brain'
 import { chimeSystem, handoffSystem, routerSystem } from '../router'
+import { DELEGATION_LINE as HANDS } from '../delegations'
 import type { Engine, EngineEvent, Turn } from './types'
 
-// What makes a reply hand work on, continue a request or pass an answer on (see each branch below).
-const HANDS = /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?[\w-]+(?: (?:em|in) #[\w-]+)?: [^\n]+|^continue (?:com|with) @?[\w-]+: .+|^repasse: .+/im
+// The same hand-off with a room name and silent witnesses, for the agent-comms tests:
+// "delegue a clara na sala auditoria com @bento, @nico: veja o retry".
+const ROOM_HANDS = /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+) na sala ([a-z0-9-]+)(?: com (@?[\w-]+(?:\s*,\s*@?[\w-]+)*))?: ([^\n]+)/gi
 
 // Deterministic engine for tests and screenshots. Never spawns anything, but
 // behaves like the real ones where it matters: it routes when given the
@@ -195,6 +197,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { o_que: what!.trim(), tipo: kind!.trim(), web: false, ...(who ? { no_lugar_de: who } : {}) }))
           reply = /^(?:Pergunta enviada|Question sent)/.test(told) ? L(`${who ?? 'O colega'} não terminou: deu erro.`, `${who ?? 'The colleague'} did not finish: it hit an error.`) : told
         } else reply = /passou do prazo|past its deadline/.test(back) ? 'Passou do prazo e ainda não terminou.' : /: não terminou|did not finish/.test(back) ? 'Não deu certo: o pedido não terminou.' : 'Pronto: o time terminou o que pedi.'
+      } else if (turn.mcpUrl && /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?[\w-]+ na sala [a-z0-9-]+(?: com @?[\w-]+(?:\s*,\s*@?[\w-]+)*)?: [^\n]+/i.test(last)) {
+        const out: string[] = []
+        for (const m of last.matchAll(ROOM_HANDS)) out.push(textOf(await callTool(turn.mcpUrl, 'pedir', {
+          para: m[1]!,
+          pedido: m[4]!,
+          sala: m[2]!,
+          ...(m[3] ? { observadores: m[3]!.split(',').map((h) => h.trim().replace(/^@/, '')) } : {})
+        })))
+        reply = out.filter((t) => !/^(?:Pedido|Request) \[/.test(t)).join('\n')
       } else if (turn.mcpUrl && /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/i.test(last)) {
         // "delegue a clara: responda o Fulano" (several lines: several requests), "delegue a clara em #vendas: …".
         const out: string[] = []

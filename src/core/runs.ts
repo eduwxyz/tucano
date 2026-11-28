@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { GrantLevel, LeaveAsk, TucaLeave } from '../shared/types'
+import type { GrantLevel, LeaveAsk, TucaLeave, MemberMode, Participant, TeamUp } from '../shared/types'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf, isAccessChange, onlyAccessChanges } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
@@ -25,7 +25,7 @@ import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOL
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
 import { noNewsPhrase, noNewsRun } from '../shared/routine-news'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
-import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
+import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom, tucaAgent } from './tuca'
 import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
 import { LER_GUIA, readGuide } from './guide'
 import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState, type Machine } from './tuca-help'
@@ -44,21 +44,22 @@ import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
-import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, routinePerson, toPeopleOnly } from './people'
+import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, routinePerson, setChannelMembers, toPeopleOnly } from './people'
 import { can, isAdmin } from './policy-people'
-import { agentsFor } from './access-policy'
+import { agentsFor, assertAgentVisible } from './access-policy'
 import { covers, restricted, sharedAccess } from '../shared/access'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, shellClass, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 import { during, inReplyTool, traceReply, tracing, type ReplyText, type ReplyTrace, type SpanRef } from './telemetry'
-import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
+import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_LINE, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, parseWitnesses, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
 import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 import type { Requester } from '../shared/doc-access'
 import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
 import { countAsk, jobTurn, MAX_CHIMES, newJob, resumeJob, stopNote, withoutGoal, type Job } from './jobs'
+import { carriedText, inheritedAudience, pickCarried, reusable, teamUpName, teamUpTopic, type Carried } from './team-up'
 import { passes } from '../shared/errors'
 
 const refOf = (d: Delegation): DelegationRef => ({ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) })
@@ -705,12 +706,42 @@ export class Runner {
     const reading = docs.map((f) => this.keepFile(mine, f))
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
+    // An answer on the @-to-include card is already this turn's decision: no second prompt goes out.
+    if (asked?.run?.inclusion && q) {
+      await this.answerInclusion(asked, q, writer, typed, mine)
+      return
+    }
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
     const members = this.members(conv)
     const may = agentsFor(writer, members) // a restricted member never calls an agent they can't see, by name or through the router
-    let responders = mentioned(typed, may).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
+    // A @ calls a reachable agent even when they are outside the room, but only the members answer
+    // without a card. The second reach check and the private audience are tested before the card.
+    const reachable = agentsFor(writer, db.agents())
+    const namedAgents = mentioned(typed, reachable).slice(0, MAX_MENTIONS)
+    let responders = namedAgents.filter((a) => may.some((m) => m.id === a.id)) // what I wrote: an option's label never calls anyone
+    const outsiders = this.inclusionCandidates(conv, writer, typed).filter((a) => !may.some((m) => m.id === a.id)).slice(0, MAX_MENTIONS)
+    // A deliberate delegation to the Tuca is pedir's route, including its room and witness form.
+    // It names the doer with @, but that @ is not a request to add them to this conversation.
+    const delegation = DELEGATION_LINE.test(typed)
+    if (outsiders.length && !asked && !delegation) {
+      if (conv.kind === 'dm') {
+        // A DM keeps its own agent alone. The mention opens a throwaway named room where both work:
+        // no card here, and no one joins the DM. The same reach and private-audience checks above
+        // decide who may be called.
+        const owner = may[0]
+        if (owner) {
+          await this.dmMentionRoom(conv, replyIn, mine, writer, owner, outsiders)
+          return
+        }
+      } else {
+        const deadlineAt = Date.now() + this.deadlineMs(await this.deps.settings())
+        this.offerInclusion(conv, replyIn, mine, writer, outsiders, deadlineAt)
+        return
+      }
+    }
+    const answerers = this.answering(conv, may, responders)
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
     // the deadline): the agent is told so in so many words.
@@ -802,9 +833,15 @@ export class Runner {
     // at once a conversation may have (Settings › Agents › Replies); past that it waits its turn.
     const cap = await this.repliesAtOnce()
     if (responders.length === 0) {
-      if (conv.kind === 'dm' || may.length === 1) responders = may
-      else if (may.length > 1) {
-        this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id, true), mine, cap)
+      if (conv.kind === 'dm' || answerers.length === 1) responders = answerers
+      else if (answerers.length > 1) {
+        this.runIn(conv.id, () => this.routeAndRun(conv, answerers, replyIn, mine.id, true), mine, cap)
+        return
+      } else if (!answerers.length && conv.kind === 'channel') {
+        // One line per thread, however many silent members and messages: the composer says the same.
+        const hint = L('Ninguém neste canal responde sem ser mencionado (todos em modo “só menção”). Escreva @nome para chamar.', 'No one in this channel answers unless mentioned (all are in mention-only mode). Write @name to call someone.')
+        const said = contextWindow(this.deps.db, mine, 20).messages.some((m) => (replyIn ? m.threadId === replyIn : !m.threadId) && m.text === hint)
+        if (!said) this.post(conv.id, replyIn, hint)
         return
       }
     }
@@ -1212,6 +1249,125 @@ export class Runner {
 
   private members(conv: Conversation): Agent[] {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
+  }
+
+  // One mode per member, stored in members.mode. A mention always wins: a silent member is only left
+  // out of the automatic roster, never out of a message that names them.
+  private answering(conv: Conversation, agents: Agent[], named: Agent[]): Agent[] {
+    const called = new Set(named.map((a) => a.id))
+    return agents.filter((a) => conv.modes?.[a.id] !== 'mention' || called.has(a.id))
+  }
+
+  // A person's @ reaches all the agents they can see, not only the ones in the room. The room's
+  // private audience is checked here as well, so a hidden or out-of-audience name never makes a card.
+  private inclusionCandidates(conv: Conversation, writer: Person, text: string): Agent[] {
+    const { db } = this.deps
+    const named = mentioned(text, agentsFor(writer, db.agents()))
+    const audienceId = inheritedAudience(conv, db.ownerId())
+    const audience = audienceId ? db.person(audienceId) ?? db.owner() : undefined
+    return named.filter((a) => {
+      if (a.archived || a.kind === 'tuca') return false
+      try {
+        assertAgentVisible(db, writer, a.id)
+        if (audience) assertAgentVisible(db, audience, a.id)
+        return true
+      } catch {
+        return false
+      }
+    })
+  }
+
+  // One card for every outside agent named in the message: Include brings them all in together, Skip
+  // leaves the room as it was. The Tuca owns the card only because a Decision needs an agent's message.
+  private offerInclusion(conv: Conversation, threadId: string | undefined, source: Message, writer: Person, outsiders: Agent[], deadlineAt: number): void {
+    // A DM never gets an inclusion card, whichever route reaches here. A mention there opens a
+    // named team room instead; the DM's member list stays as it was.
+    if (conv.kind === 'dm') return
+    const { db, emit } = this.deps
+    // A fresh workspace may not have talked to the Tuca yet: the card is his, so he is made here.
+    let tuca = db.agents().find((a) => a.kind === 'tuca' && !a.archived)
+    if (!tuca) {
+      tuca = tucaAgent('sonnet', db.agents().map((a) => a.handle))
+      db.saveAgent(tuca)
+      emit({ type: 'agent', agent: tuca })
+    }
+    const names = outsiders.map((a) => a.name).join(L(' e ', ' and '))
+    const decision: Decision = {
+      question: L(`Incluir ${names} nesta conversa?`, `Include ${names} in this conversation?`).slice(0, 200),
+      kind: 'single',
+      options: [
+        { label: L('Incluir', 'Include'), description: L('Entra na conversa e responde a esta mensagem.', 'Joins the conversation and answers this message.'), recommended: true },
+        { label: L('Pular', 'Skip'), description: L('Fica de fora. A menção não chama ninguém.', 'Stays out. The mention calls no one.') }
+      ]
+    }
+    const handles = outsiders.map((a) => `@${a.handle}`).join(', ')
+    const card: Message = {
+      id: randomUUID(),
+      conversationId: conv.id,
+      author: { kind: 'agent', id: tuca.id },
+      text: L(`Você mencionou ${handles}, que não está na conversa.`, `You mentioned ${handles}, who is not in the conversation.`),
+      at: Date.now(),
+      ...(threadId ? { threadId } : {}),
+      run: {
+        status: 'waiting_input',
+        steps: [],
+        question: decision.question,
+        questions: [decision],
+        askedTo: writer.id,
+        inclusion: { messageId: source.id, text: source.text.slice(0, 4000), agentIds: outsiders.map((a) => a.id), by: writer.id }
+      }
+    }
+    db.saveMessage(card)
+    emit({ type: 'message', message: card })
+    const q: Question = { id: card.id, conversationId: conv.id, ...(threadId ? { threadId } : {}), agentId: tuca.id, text: decision.question, askedTo: writer.id, requestedBy: writer.id, state: 'open', deadlineAt, createdAt: card.at }
+    db.saveQuestion(q)
+    emit({ type: 'inbox' })
+    this.deps.notify?.(L('O Tuca pede uma decisão', 'The Tuca asks for a decision'), decision.question, conv.id, 'question', threadId, [writer.id])
+  }
+
+  // The card is answered here, without a second prompt: Include writes membership with the same
+  // setChannelMembers the dialog uses, then the original mention wakes the agents in this turn.
+  private async answerInclusion(card: Message, q: Question | undefined, writer: Person, typed: string, replyTo: Message): Promise<void> {
+    const { db, emit } = this.deps
+    const run = card.run!
+    const inc = run.inclusion!
+    const conv = db.conversation(card.conversationId)
+    if (!conv) return
+    const chosen = run.answers?.[0]?.chosen?.[0]
+    const include = chosen === 0 || /^(?:incluir|include)$/i.test(typed.trim())
+    if (q?.state === 'open') {
+      db.saveQuestion({ ...q, state: 'answered', answeredBy: writer.id, answeredAt: Date.now() })
+      emit({ type: 'inbox' })
+    }
+    this.update(card, { run: { ...run, status: 'done', answeredBy: writer.id, ...(typed ? { answeredInText: true as const } : {}) } })
+    if (!include) return
+
+    // Reach is checked again now, on the person who approved and on the room's private audience.
+    const named = mentioned(inc.text, agentsFor(writer, db.agents()))
+    const audienceId = inheritedAudience(conv, db.ownerId())
+    const audience = audienceId ? db.person(audienceId) ?? db.owner() : undefined
+    const allowed = named.filter((a) => inc.agentIds.includes(a.id) && !conv.members.includes(a.id) && !a.archived && a.kind !== 'tuca' && (() => {
+      try {
+        assertAgentVisible(db, writer, a.id)
+        if (audience) assertAgentVisible(db, audience, a.id)
+        return true
+      } catch {
+        return false
+      }
+    })())
+    if (!allowed.length) return
+    setChannelMembers(db, writer, { id: conv.id, agentIds: [...conv.members, ...allowed.map((a) => a.id)], allowDm: true })
+    emit({ type: 'conversation', conversation: db.conversation(conv.id)! })
+    const cap = await this.repliesAtOnce()
+    const answer = async (): Promise<unknown> => {
+      let before: Promise<Message | undefined> | undefined
+      for (const agent of allowed) {
+        const go = (): Promise<Message | undefined> => this.startReply(agent, conv, { depth: 1, threadId: card.threadId, replyTo: inc.messageId }, { urgent: true, parallel: true })
+        before = before ? before.then(go, go) : go()
+      }
+      return before ?? Promise.resolve()
+    }
+    this.runIn(conv.id, answer, replyTo, cap)
   }
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
@@ -2195,12 +2351,20 @@ ${note}`,
           if (!to) return textResult(before ? L(`Você não alcança mais quem fez o pedido [${codeOf(before)}]. Peça de novo, sem "continuar".`, `You no longer reach whoever did request [${codeOf(before)}]. Ask again, without "continuar".`) : L(`Você não alcança ninguém chamado "${String(args['para'] ?? '')}". Quem você alcança: ${now.map((a) => `@${a.handle}`).join(', ')}.`, `You reach no one called "${String(args['para'] ?? '')}". Whom you reach: ${now.map((a) => `@${a.handle}`).join(', ')}.`), true)
           // This reply is itself a request's work: nothing goes back to whoever is already waiting on it, and it only stacks so far.
           const chain = this.chainOf(this.handedIn(msg))
+          const parsed = parseWitnesses(args, now, agent, to, chain)
+          if ('error' in parsed) return textResult(parsed.error, true)
+          let witnesses = parsed.witnesses
           if (chain.some((c) => c.from === to.id)) return textResult(L(`${to.name} já está esperando por este pedido: não dá pra pedir de volta a quem pediu. Se falta algo dele, pergunte com ask_user.`, `${to.name} is already waiting on this request: you can't ask back whoever asked. If you need something from them, ask with ask_user.`), true)
           if (chain.length >= MAX_CHAIN) return textResult(L(`Este trabalho já passou por ${MAX_CHAIN} pedidos seguidos, o máximo. Faça você, ou diga na resposta o que ficou faltando.`, `This work has already gone through ${MAX_CHAIN} requests in a row, the most allowed. Do it yourself, or say in your reply what is left.`), true)
           if (this.paused) return textResult(L('Os agentes estão pausados: nenhum pedido sai agora.', 'The agents are paused: no request goes out now.'), true)
           if (job.state === 'stopped') return textResult(L('Este trabalho parou nos freios (nada andava): nenhum pedido sai até alguém clicar em Continuar. Encerre dizendo onde parou.', "This work stopped on its brakes (nothing was moving): no request goes out until someone clicks Continue. End saying where it stopped."), true)
           if (asks >= MAX_DELEGATIONS_PER_REPLY) return textResult(L(`Já são ${MAX_DELEGATIONS_PER_REPLY} pedidos nesta resposta, o máximo. Encerre e espere o que voltar.`, `That's ${MAX_DELEGATIONS_PER_REPLY} requests in this reply, the most allowed. End now and wait for what comes back.`), true)
           if (before?.state !== 'open' && myOpen().length >= MAX_OPEN_DELEGATIONS) return textResult(L(`Você já tem ${MAX_OPEN_DELEGATIONS} pedidos em aberto, o máximo. Espere algum voltar, ou cancele um com cancelar_pedido.`, `You already have ${MAX_OPEN_DELEGATIONS} open requests, the most allowed. Wait for one to come back, or cancel one with cancelar_pedido.`), true)
+          // Reach again, at the moment the request and its room are written. The first check was at
+          // parse time; access may have changed while the reply was working.
+          const written = parseWitnesses(args, agentsFor(requester, db.agents(), agent.id), agent, to, chain)
+          if ('error' in written) return textResult(written.error, true)
+          witnesses = written.witnesses
           let d: Delegation
           let channel: Conversation
           // A request never ends up more visible than where it was asked: from a DM, with other people in
@@ -2214,7 +2378,12 @@ ${note}`,
             // The same rule on a follow-up: one asked before in a channel doesn't take what is said in a DM there.
             if (fromDm && there.kind !== 'dm' && !saidChannel(there)) return textResult(L(`O pedido [${codeOf(before)}] está em ${placeOf(there)}, e esta conversa é uma DM: continuar levaria o que foi dito aqui pra lá. Peça de novo, sem "continuar" (fica numa DM), ou só continue se ${settings.workspaceName} escrever o nome do canal.`, `Request [${codeOf(before)}] is in ${placeOf(there)}, and this conversation is a DM: continuing would take what was said here there. Ask again, without "continuar" (it stays in a DM), or continue only if ${settings.workspaceName} writes the channel's name.`), true)
             channel = there
-            d = before.state === 'open' ? this.addTo(before, agent, to, channel, ask) : this.reopen(before, agent, to, channel, ask, msg, requester, settings.workspaceName)
+            const participants = participantsOf(before, to.id, witnesses)
+            if (channel.teamUp && witnesses.length) {
+              const ids = [...new Set([...channel.members, ...witnesses.map((w) => w.id)])]
+              db.setMembers(channel.id, ids, Object.fromEntries([...ids.map((id) => [id, 'answer' as MemberMode]), ...witnesses.map((w) => [w.id, 'mention' as MemberMode])]))
+            }
+            d = before.state === 'open' ? this.addTo(before, agent, to, channel, ask, participants) : this.reopen(before, agent, to, channel, ask, msg, requester, settings.workspaceName, participants)
           } else {
             // Only channels the person this reply is for can see: handing work never reaches further than they do.
             const channels = channelsOf(db.conversations(), to.id).filter((c) => sees.canSeeConversation(requester, c))
@@ -2229,7 +2398,16 @@ ${note}`,
             if (!picked && !channels.length) return textResult(L(`${to.name} não está em "${wanted}", nem em canal nenhum. Peça sem dizer o canal: o pedido chega na DM dele.`, `${to.name} is not in "${wanted}", nor in any channel. Ask without naming a channel: the request arrives in their DM.`), true)
             if (!picked) return textResult(L(`${to.name} não está em "${wanted}". Os canais dele: ${channels.map((c) => `#${c.name}`).join(', ')}. Ou "dm", se o assunto não é de nenhum.`, `${to.name} is not in "${wanted}". Their channels: ${channels.map((c) => `#${c.name}`).join(', ')}. Or "dm", if the subject belongs to none.`), true)
             channel = picked
-            d = this.delegate(agent, to, channel, ask, msg, requester, settings.workspaceName)
+            let up: TeamUp | undefined
+            const wantedRoom = typeof args['sala'] === 'string' ? args['sala'].trim() : ''
+            if (wantedRoom) {
+              const room = this.teamUpRoom(agent, to, witnesses, conv, msg, requester, wantedRoom)
+              if ('error' in room) return textResult(room.error, true)
+              channel = room.channel
+              up = room.teamUp
+            }
+            const participants: Participant[] = [{ agentId: to.id, role: 'do' }, ...witnesses.map((w) => ({ agentId: w.id, role: 'watch' as const }))]
+            d = this.delegate(agent, to, channel, ask, msg, requester, settings.workspaceName, participants, up)
             // The parts already under way learn of this one at their next step: no one does another's part.
             for (const x of db.delegationsFrom(agent.id, d.originConversationId, d.originThreadId)) if (x.id !== d.id && x.state === 'open') this.noteFor(x.id, teammateNote('asked', to.name, ask.text))
           }
@@ -4494,12 +4672,84 @@ ${note}`,
   }
 
   // A message in an agent's name that no reply wrote: a request, what came back from one, an answer to its question.
-  private say(by: string, conversationId: string, threadId: string | undefined, text: string, delegation: DelegationRef, id: string = randomUUID()): Message {
+  private say(by: string, conversationId: string, threadId: string | undefined, text: string, delegation?: DelegationRef, id: string = randomUUID()): Message {
     const at = Date.now()
     const m: Message = { id, conversationId, author: { kind: 'agent', id: by }, text, at, run: { status: 'done', steps: [], endedAt: at, delegation }, ...(threadId ? { threadId } : {}) }
     this.deps.db.saveMessage(m)
     this.deps.emit({ type: 'message', message: m })
     return m
+  }
+
+  // A normal channel an agent opens from pedir with a room name. Same caller, source and guests
+  // inside six hours reuses the room. No person invite, no grant, no new membership on other rooms.
+  private teamUpRoom(
+    agent: Agent,
+    to: Agent,
+    witnesses: Agent[],
+    source: Conversation,
+    msg: Message,
+    requester: Person,
+    wanted: string
+  ): { channel: Conversation; teamUp: TeamUp } | { error: string } {
+    return this.openTeamUpRoom({ by: agent, guests: [to, ...witnesses], witnesses, source, msg, requester, title: wanted })
+  }
+
+  // A person's @ in a DM opens the same kind of named room and both agents work there. The DM keeps
+  // its own agent alone: only a line pointing at the room is written in it. The name comes from the
+  // handles, and the person who wrote the mention is a member of the room.
+  private async dmMentionRoom(conv: Conversation, threadId: string | undefined, msg: Message, writer: Person, owner: Agent, guests: Agent[]): Promise<void> {
+    const title = `team-up ${[owner, ...guests].map((g) => g.handle).join(' ')}`
+    const source = { ...conv, name: L(`DM com ${owner.name}`, `DM with ${owner.name}`) }
+    const room = this.openTeamUpRoom({ by: owner, guests, witnesses: [], source, msg, requester: writer, title })
+    const names = guests.map((g) => `@${g.handle}`).join(', ')
+    this.post(conv.id, threadId, L(`Trouxe ${names} para #${room.channel.name}; o trabalho continua lá.`, `Brought ${names} into #${room.channel.name}; the work continues there.`))
+    const cap = await this.repliesAtOnce()
+    const answer = async (): Promise<unknown> => {
+      let before: Promise<Message | undefined> | undefined
+      for (const agent of [owner, ...guests]) {
+        const go = (): Promise<Message | undefined> => this.startReply(agent, room.channel, { depth: 1, replyTo: room.handoff.id, task: msg.text }, { urgent: true, parallel: true })
+        before = before ? before.then(go, go) : go()
+      }
+      return before ?? Promise.resolve()
+    }
+    this.runIn(room.channel.id, answer, room.handoff, cap)
+  }
+
+  // The one room builder for pedir's named room and a DM mention: same name limit, same handoff,
+  // same private audience, same six-hour reuse. `createdBy` is the person who asked for the room.
+  private openTeamUpRoom(opts: { by: Agent; guests: Agent[]; witnesses: Agent[]; source: Conversation; msg: Message; requester: Person; title: string }): { channel: Conversation; teamUp: TeamUp; handoff: Message } {
+    const { by, guests, witnesses, source, msg, requester, title } = opts
+    const { db } = this.deps
+    const all = [by.id, ...guests.map((g) => g.id)]
+    const now = Date.now()
+    const seen = db.conversations().filter((c) => c.teamUp && (c.teamUp.privateTo ? c.teamUp.privateTo === requester.id : true))
+    const existing = seen.find((c) => c.teamUp && reusable(c.teamUp, source.id, by.id, all, now))
+    if (existing?.teamUp) {
+      const ids = [...new Set([...existing.members, ...all])]
+      db.setMembers(existing.id, ids, Object.fromEntries([
+        ...ids.map((id) => [id, 'answer' as MemberMode]),
+        ...witnesses.map((w) => [w.id, 'mention' as MemberMode])
+      ]))
+      return { channel: db.conversation(existing.id)!, teamUp: existing.teamUp, handoff: db.recentMessages(existing.id, 1).at(-1) ?? msg }
+    }
+    const taken = (name: string): boolean => db.conversations().some((c) => c.name === name)
+    const name = teamUpName(guests, taken, title)
+    const mode: Record<string, MemberMode> = Object.fromEntries([
+      ...db.agents().filter((a) => source.members.includes(a.id)).map((a) => [a.id, source.modes?.[a.id] ?? 'answer' as MemberMode]),
+      ...all.map((id) => [id, 'answer' as MemberMode]),
+      ...witnesses.map((w) => [w.id, 'mention' as MemberMode])
+    ])
+    const up: TeamUp = { from: source.id, title: title || name, by: by.id, at: now, guests: all, privateTo: inheritedAudience(source, db.ownerId()) }
+    db.createConversation({ id: randomUUID(), kind: 'channel', name, topic: teamUpTopic(by.name, source.name), members: Object.keys(mode), modes: mode, teamUp: up, wikiCapture: false, createdBy: requester.id, createdAt: now })
+    const room = db.conversations().find((c) => c.name === name && c.teamUp?.at === now)!
+    const carried: Carried[] = pickCarried(contextWindow(db, msg, 24).messages.filter((m) => m.text.trim()).map((m) => ({
+      name: m.author.kind === 'agent' ? db.agent(m.author.id)?.name ?? m.author.id : m.author.kind === 'person' ? db.person(m.author.id)?.name ?? requester.name : L('Quem pediu', 'Who asked'),
+      text: m.text,
+      at: m.at
+    }))).kept
+    const handoff = this.say(by.id, room.id, undefined, carriedText({ by: by.name, guests: guests.map((g) => `@${g.handle}`), source: source.name, messages: carried }))
+    this.deps.emit({ type: 'conversation', conversation: room })
+    return { channel: room, teamUp: up, handoff }
   }
 
   // The request becomes a thread in the channel of whoever does it, and they start on it.
@@ -4523,7 +4773,7 @@ ${note}`,
     return asked && asked.conversationId === reply.conversationId && !asked.threadId && asked.author.kind === 'person' ? asked.id : undefined
   }
 
-  private delegate(from: Agent, to: Agent, channel: Conversation, ask: { text: string; done?: string; dueAt?: number }, reply: Message, requester: Person, me: string): Delegation {
+  private delegate(from: Agent, to: Agent, channel: Conversation, ask: { text: string; done?: string; dueAt?: number }, reply: Message, requester: Person, me: string, participants?: Participant[], teamUp?: TeamUp): Delegation {
     const id = randomUUID()
     const rootId = randomUUID()
     // Asked from inside a thread, of someone in the same conversation: it stays in that thread, so
@@ -4531,7 +4781,7 @@ ${note}`,
     const inside = channel.id === reply.conversationId ? (reply.threadId ?? this.originThread(reply)) : undefined
     const root = this.say(from.id, channel.id, inside, askMessage(to, ask), { id, to: to.id, conversationId: channel.id, rootId, ...(inside ? { threadId: inside } : {}) }, rootId)
     const origin = this.originThread(reply)
-    const d: Delegation = { id, from: from.id, to: to.id, conversationId: channel.id, rootId: root.id, ...(inside ? { threadId: inside } : {}), originConversationId: reply.conversationId, ...(origin ? { originThreadId: origin } : {}), originMessageId: reply.id, requestedBy: requester.id, text: ask.text, ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt } : {}), state: 'open', createdAt: Date.now() }
+    const d: Delegation = { id, from: from.id, to: to.id, conversationId: channel.id, rootId: root.id, ...(inside ? { threadId: inside } : {}), originConversationId: reply.conversationId, ...(origin ? { originThreadId: origin } : {}), originMessageId: reply.id, requestedBy: requester.id, text: ask.text, ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt } : {}), state: 'open', ...(participants ? { participants } : {}), createdAt: Date.now() }
     this.keep(d)
     this.startAsked(d, from, to, channel, ask.done, me)
     return d
@@ -4539,10 +4789,10 @@ ${note}`,
 
   // A follow-up on a request that came back: the same one opens again, asked in its own thread, where the
   // one who did it sees what it already did; what it ends with goes back to where it is asked from now.
-  private reopen(d: Delegation, from: Agent, to: Agent, channel: Conversation, ask: { text: string; done?: string; dueAt?: number }, reply: Message, requester: Person, me: string): Delegation {
+  private reopen(d: Delegation, from: Agent, to: Agent, channel: Conversation, ask: { text: string; done?: string; dueAt?: number }, reply: Message, requester: Person, me: string, participants = d.participants): Delegation {
     const origin = this.originThread(reply)
     const { asking: _asking, result: _result, endedAt: _ended, approval: _approval, nudges: _nudges, done: _done, dueAt: _due, originThreadId: _thread, ...rest } = d
-    const next: Delegation = { ...rest, originConversationId: reply.conversationId, ...(origin ? { originThreadId: origin } : {}), originMessageId: reply.id, requestedBy: requester.id, text: ask.text, ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt } : {}), state: 'open', askingTold: false, parkedTold: false, told: false, lateTold: false, createdAt: Date.now() }
+    const next: Delegation = { ...rest, originConversationId: reply.conversationId, ...(origin ? { originThreadId: origin } : {}), originMessageId: reply.id, requestedBy: requester.id, text: ask.text, ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt } : {}), state: 'open', askingTold: false, parkedTold: false, told: false, lateTold: false, ...(participants ? { participants } : {}), createdAt: Date.now() }
     this.keep(next)
     this.say(from.id, channel.id, workThread(d), askMessage(to, ask), refOf(next))
     this.startAsked(next, from, to, channel, ask.done, me, true)
@@ -4551,8 +4801,8 @@ ${note}`,
 
   // More for a request still under way: said in its thread, and the one doing it takes it after the reply it
   // is on (or now, when it is between replies). The request ends with that reply, so what comes back has it too.
-  private addTo(d: Delegation, from: Agent, to: Agent, channel: Conversation, ask: { text: string; done?: string; dueAt?: number }): Delegation {
-    const next: Delegation = { ...d, ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt, lateTold: false } : {}) }
+  private addTo(d: Delegation, from: Agent, to: Agent, channel: Conversation, ask: { text: string; done?: string; dueAt?: number }, participants = d.participants): Delegation {
+    const next: Delegation = { ...d, ...(participants ? { participants } : {}), ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt, lateTold: false } : {}) }
     this.keep(next)
     this.say(from.id, channel.id, workThread(d), askMessage(to, ask), refOf(next))
     void this.startReply(to, channel, { depth: 1, threadId: workThread(d), handed: d.id, task: L(`${from.name} acrescentou ao pedido dele a mensagem acima, enquanto você trabalhava nele. Leve em conta e siga com o pedido inteiro; não refaça o que já está pronto.`, `${from.name} added the message above to their request while you were working on it. Take it into account and go on with the whole request; do not redo what is done.`) })
@@ -4583,7 +4833,8 @@ ${note}`,
     return {
       ...(job?.text.trim() ? { asked: { by: me, text: job.text } } : {}),
       split: all.map((x) => ({ to: name(x.to), text: x.text, state: x.state, code: codeOf(x), ...(x.id === d.id ? { mine: true } : {}) })),
-      delivered
+      delivered,
+      ...(d.participants?.some((p) => p.role === 'watch') ? { watching: d.participants.filter((p) => p.role === 'watch').map((p) => name(p.agentId)) } : {})
     }
   }
 
@@ -4882,4 +5133,14 @@ export function routerReserves(members: Agent[], settings: Pick<Settings, 'engin
     list.push(m)
   }
   return list.slice(0, 2)
+}
+
+// The doer and the silent witnesses, kept on the delegation row: a follow-up adds witnesses without
+// losing the ones already there.
+export function participantsOf(d: Pick<Delegation, 'participants'>, doer: string, witnesses: Agent[]): Participant[] {
+  const list = (d.participants ?? []).filter((p) => p.role === 'do')
+  const doers = list.some((p) => p.agentId === doer) ? list : [...list, { agentId: doer, role: 'do' as const }]
+  const watches = new Map<string, Participant>((d.participants ?? []).filter((p) => p.role === 'watch').map((p) => [p.agentId, p]))
+  for (const w of witnesses) watches.set(w.id, { agentId: w.id, role: 'watch' })
+  return [...doers, ...watches.values()]
 }

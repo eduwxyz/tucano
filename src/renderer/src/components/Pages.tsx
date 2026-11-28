@@ -3903,6 +3903,19 @@ export function SettingsPage(): ReactNode {
                     placeholder={L('Escolha', 'Pick')}
                   />
                 </Field>
+                <Field label={L('Salas de trabalho fecham após (dias sem nada)', 'Work rooms close after (quiet days)')} hint={L('Uma sala aberta para trabalho em equipe. Cada mensagem nova empurra o prazo. Uma resposta em curso impede o fechamento.', 'A room opened for a team. Each new message pushes the deadline out. A running reply blocks closure.')}>
+                  <Select
+                    value={String(settings.teamUpDays ?? 0)}
+                    onChange={(v) => { if (v) updateSettings({ teamUpDays: Number(v) }) }}
+                    options={[
+                      { value: '0', label: L('Não expirar', 'No expiry') },
+                      { value: '5', label: L('5 dias', '5 days') },
+                      { value: '14', label: L('14 dias', '14 days') },
+                      { value: '30', label: L('30 dias', '30 days') }
+                    ]}
+                    placeholder={L('Escolha', 'Pick')}
+                  />
+                </Field>
               </div>
               <div className="key-row">
                 <Icon name="play" />

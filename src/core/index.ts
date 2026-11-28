@@ -16,9 +16,9 @@ import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type LentFolder, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, routineCap, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
-import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, setChannelMembers as saveChannelMembers, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
-import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
+import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
@@ -92,6 +92,7 @@ import { nodeOf } from '../shared/node-link'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
+import { staleTeamUps, teamUpDays } from './team-up'
 import { agentFromDraft, availableModels, freeHandle, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { guideIndex, readGuide } from './guide'
 import { McpDoor, type McpCaller, type McpHttpOut, type RunLine } from './mcp'
@@ -143,6 +144,7 @@ const clineLogin = clineLoginDir(clineDir)
 // Until the settings are read, the language of a new install: the Mac's.
 setLang(langOf(process.env['TUCANO_LOCALE']))
 initializeWorkspace(db)
+db.protectTeamUpPrivacy()
 // A workspace made from the switcher starts with the name it was given there.
 if (db.created && process.env['TUCANO_WORKSPACE_LABEL']) db.setSettings({ workspaceLabel: process.env['TUCANO_WORKSPACE_LABEL'] })
 const appTheme = process.env['TUCANO_THEME']
@@ -1395,6 +1397,7 @@ void ready.then(async () => {
   toMain({ type: 'ready' })
   workspaceSummary()
   await runner.expireApprovals()
+  sweepTeamUps()
   const settled = await runner.settleDecidedRuns()
   if (settled) console.log(`[core] ${settled} reply(ies) closed: their approval was decided without them`)
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
@@ -1404,6 +1407,7 @@ void ready.then(async () => {
   setInterval(() => runner.sweepQuestions(), 60_000).unref()
   setInterval(() => runner.sweepDelegations(), 60_000).unref()
   setInterval(() => runner.sweepRetries(), 60_000).unref()
+  setInterval(sweepTeamUps, 3_600_000).unref() // quiet team-up rooms close once an hour
   if (!fake) {
     // A port taken (another Tucano open, say) is logged and the rest goes on: a call there reaches
     // a server that doesn't know its token, never this workspace's data.
@@ -1475,6 +1479,21 @@ function setFolders(agent: Agent, folders: NonNullable<Agent['folders']>): void 
   db.setFolders(agent.id, folders)
   emit({ type: 'agent', agent: db.agent(agent.id)! })
   if (agent.computer) void computers.ensure(agent.id).catch((e: unknown) => console.error('[computer]', e))
+}
+
+// A team-up room closes after its quiet days are up, unless a reply is still running there. Messages
+// are never deleted by age. 0 never expires, the default.
+function sweepTeamUps(): void {
+  const days = teamUpDays(settings().teamUpDays)
+  if (!days) return
+  const busy = new Set(db.messagesWithRun(['working', 'waiting_approval']).map((m) => m.conversationId))
+  const stale = staleTeamUps(db.conversations(), (id) => db.conversation(id)?.lastAt, { days })
+  const ctx: Ctx = { person: db.owner() }
+  for (const id of stale) {
+    if (busy.has(id)) continue
+    const c = db.conversation(id)
+    if (c?.kind === 'channel') dropConversation(ctx, c)
+  }
 }
 
 function emitConversations(ids?: string[]): void {
@@ -2366,13 +2385,12 @@ const api: Handlers = {
     db.setTopic(id, topic.trim() || undefined)
     emitConversations([id])
   },
-  setChannelMembers: ({ id, agentIds }, ctx) => {
+  setChannelMembers: ({ id, agentIds, modes }, ctx) => {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     assertChannelVisible(db, ctx.person, conv)
-    const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
-    db.setMembers(id, membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a))))
+    saveChannelMembers(db, ctx.person, { id, agentIds, ...(modes ? { modes } : {}) })
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,
