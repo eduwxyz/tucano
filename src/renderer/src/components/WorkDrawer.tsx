@@ -149,6 +149,7 @@ export function WorkDrawer({
           {running.map((m) => (
             <div className="work-row" key={m.id}>
               <button type="button" className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
+                {m.run?.sessionName && <span className="work-row__name">{m.run.sessionName}</span>}
                 <span className="work-row__dot" aria-hidden />
                 <span className="work-row__text">{asked(m)}</span>
               </button>

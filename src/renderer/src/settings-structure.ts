@@ -45,6 +45,7 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'models-classifiers', page: 'modelos', label: L('Classificadores', 'Classifiers'), icon: 'spark', color: 'var(--c-sky)', keys: ['classifiers', 'classifierJobs', 'classifierKeys', 'jevKey'], scope: 'workspace', visible: admin },
     { id: 'models-router', page: 'modelos', label: L('Roteador', 'Router'), icon: 'route', color: 'var(--c-teal)', keys: ['routerModel'], scope: 'workspace', visible: admin },
     { id: 'knowledge-memory', page: 'modelos', label: L('Memória', 'Memory'), icon: 'book', color: 'var(--c-violet)', keys: ['memoryModel', 'memoryLearning'], scope: 'workspace', visible: admin },
+    { id: 'models-session-names', page: 'modelos', label: L('Nomes das sessões', 'Session names'), icon: 'spark', color: 'var(--c-indigo)', keys: ['sessionNameEnabled', 'sessionNameModel', 'sessionNameEffort'], scope: 'workspace', visible: admin },
     { id: 'connections-phone', page: 'conexoes', label: L('Celular e Telegram', 'Phone and Telegram'), icon: 'phone', color: 'var(--c-green)', keys: ['telegram'], scope: 'mixed', visible: owner },
     { id: 'connections-servers', page: 'conexoes', label: L('Servidores', 'Servers'), icon: 'server', color: 'var(--c-graphite)', keys: ['paused', 'node'], scope: 'computer', visible: admin && servers },
     { id: 'connections-traces', page: 'conexoes', label: 'Traces', icon: 'report', color: 'var(--c-violet)', keys: [], scope: 'workspace', visible: admin },
@@ -67,7 +68,7 @@ export type SettingsPageId = SettingsSection['page']
 const tabSections: Readonly<Record<string, readonly SettingsSectionId[]>> = {
   geral: ['workspace-context', 'app-appearance', 'app-notifications', 'app-dictation', 'app-conversation'],
   agentes: ['agents-permissions', 'agents-replies', 'agents-limits', 'agents-routines', 'agents-tuca', 'agents-browser'],
-  modelos: ['models-agents', 'models-runtimes', 'models-accounts', 'models-classifiers', 'models-router', 'knowledge-memory'],
+  modelos: ['models-agents', 'models-runtimes', 'models-accounts', 'models-classifiers', 'models-router', 'knowledge-memory', 'models-session-names'],
   conexoes: ['connections-phone', 'connections-servers', 'connections-traces', 'harnesses-keys'],
   workspace: ['workspace-people', 'workspace-activity', 'workspace-team', 'workspace-backups', 'app-updates', 'workspace-danger']
 }
@@ -118,6 +119,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'models-classifiers': [L('Usos dos classificadores', 'Classifier Uses'), 'Jev', 'TypeSafe', 'OpenRouter', 'OpenAI', 'Luna', 'Google', 'Gemini', L('Chave do classificador', 'Classifier key')],
     'models-router': [L('Modelo do roteador', 'Router model'), L('Quem responde nos canais', 'Who replies in channels')],
     'knowledge-memory': [L('Modelo da memória', 'Memory model'), L('O que ele aprende sobre você', 'What it learns about you')],
+    'models-session-names': [L('Nomes das sessões', 'Session Names'), L('Modelo das sessões', 'Session Names model'), L('Nível de pensamento', 'Thinking level')],
     'connections-phone': ['Telegram', L('Celular', 'Phone'), 'iPhone'],
     'connections-servers': [L('Servidor', 'Server'), L('Emprestar este computador', 'Lend this computer'), L('Apps', 'Apps')],
     'connections-traces': ['OpenTelemetry', 'OTLP', 'Langfuse', 'Grafana', 'Honeycomb', 'Datadog', L('Observabilidade', 'Observability'), L('Latência', 'Latency')],

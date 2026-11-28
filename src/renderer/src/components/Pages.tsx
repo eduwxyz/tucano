@@ -2775,6 +2775,39 @@ export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChang
   return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />
 }
 
+// The Session Names switch and, only while it is on, the harness, model and thinking level used for
+// new names. Kept on its own so the switch and the trio can be tested without the whole settings page.
+export function SessionNamesFields(): ReactNode {
+  const settings = useStore((s) => s.settings)
+  return (
+    <>
+      <div className="key-row">
+        <Icon name="spark" />
+        <div className="grow">
+          <strong>{L('Nomes das sessões', 'Session Names')}</strong>
+          <p className="muted small">{L('Dá um nome a cada resposta quando ela começa. Desligado, nenhuma sessão nova recebe nome.', 'Names each reply when it starts. Off, no new session gets a name.')}</p>
+        </div>
+        <Toggle on={settings.sessionNameEnabled === true} onChange={(sessionNameEnabled) => updateSettings({ sessionNameEnabled })} label={L('Nomes das sessões', 'Session Names')} />
+      </div>
+      {settings.sessionNameEnabled === true && (
+        <>
+          <Field label={L('Modelo das sessões', 'Session Names model')} hint={L('Harness, modelo e nível de pensamento, como o da memória.', 'Harness, model and thinking level, just like the memory model.')}>
+            <ModelSelect value={settings.sessionNameModel || settings.memoryModel} onChange={(sessionNameModel) => updateSettings({ sessionNameModel })} />
+          </Field>
+          <Field label={L('Nível de pensamento', 'Thinking level')} hint={L('Quanto o modelo pensa antes de dar o nome.', 'How hard the model thinks before naming the session.')}>
+            <Select
+              value={settings.sessionNameEffort ?? 'low'}
+              onChange={(v) => { if (v) updateSettings({ sessionNameEffort: v as typeof settings.sessionNameEffort }) }}
+              options={EFFORTS.map((e) => ({ value: e.id, label: e.label }))}
+              aria-label={L('Esforço de raciocínio', 'Reasoning effort')}
+            />
+          </Field>
+        </>
+      )}
+    </>
+  )
+}
+
 // ---------- Settings ----------
 
 // Português or English: the app's, and the language agents answer in. Labeled in both, so anyone finds it.
@@ -4103,6 +4136,14 @@ export function SettingsPage(): ReactNode {
                   />
                 </Field>
               </div>
+            </Card>
+          </SectionAnchor>
+        )}
+
+        {on('modelos') && admin && (
+          <SectionAnchor id="models-session-names" sections={structure}>
+            <Card title={L('Nomes das sessões', 'Session names')} section="models-session-names" lead={L('Um modelo pequeno dá um nome à resposta quando ela começa. O nome aparece no cabeçalho da mensagem e da thread.', 'A small model names a reply when it starts. The name appears in the message and thread headers.')}>
+              <SessionNamesFields />
             </Card>
           </SectionAnchor>
         )}
