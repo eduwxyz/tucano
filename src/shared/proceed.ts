@@ -1,0 +1,121 @@
+// A finished reply that ends with one action offered in words ("say the word and I'll…") gets a
+// single approval button. The detector reads the last paragraphs of the reply, not a tool call:
+// there is no card to ask the agent for, because the proposal is already what it said.
+import { L } from './lang'
+
+// The visible label is one phrase per message, picked from this list by the message id. It never
+// reshuffles when the window redraws the conversation.
+export const PROCEED_LABELS: readonly string[] = [
+  L('Sim', 'Yes'),
+  L('Claro!', 'Of course!'),
+  L('Vai em frente', 'Go on'),
+  L('Por favor, faça', 'Please do'),
+  L('Absolutamente', 'Absolutely'),
+  L('Faça isso', 'Do it'),
+  L('Vamos lá', "Let's go"),
+  L('Pode seguir', 'Go for it'),
+  L('Com certeza', 'Sure thing'),
+  L('Pode ir', 'Go ahead'),
+  L('Sem dúvida', 'By all means'),
+  L('Pode contar comigo', 'Count on me'),
+  L('Eu aprovo', 'I approve'),
+  L('Combinado', 'Agreed'),
+  L('Já', 'Right away'),
+  L('Faça assim', 'Make it so'),
+  L('Eu topo', "I'm in"),
+  L('Vá na frente', 'Lead the way'),
+  L('Afirmativo', 'Affirmative'),
+  L('Parece bom', 'Sounds good'),
+  L('Vamos fazer', "Let's do it"),
+  L('Aprovado', 'Approved'),
+  L('Sinal verde', 'Green light')
+]
+
+export function proceedLabel(messageId: string): string {
+  let hash = 2166136261 // FNV-1a: stable across processes, locales and re-renders
+  for (let i = 0; i < messageId.length; i++) {
+    hash ^= messageId.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return PROCEED_LABELS[(hash >>> 0) % PROCEED_LABELS.length]!
+}
+
+// The family the agent actually writes, in both languages. One match per paragraph and one
+// action clause: two invitations or two things it offers to do are a menu, not one proposal.
+const INVITATION = new RegExp(
+  [
+    'say the word',
+    'at your word',
+    'just say (?:yes|so|yes or no)',
+    'if you want',
+    "if you['’]d like",
+    'if you would like',
+    'want me to',
+    'do you want me to',
+    'would you like me to',
+    'your call',
+    'if you say so',
+    'just tell me to',
+    'tell me to',
+    'let me know if',
+    'shall i',
+    'say so and i',
+    'se quiser',
+    'se você quiser',
+    'se quiseres',
+    'quando quiser',
+    'quando você quiser',
+    'quando você mandar',
+    'só me avisar',
+    'só me dizer',
+    'só dizer',
+    'só pedir',
+    'é só dizer',
+    'diga sim',
+    'me avise',
+    'você decide',
+    'fico no aguardo',
+    'se permitir',
+    'se eu puder',
+    'posso eu',
+    'quer que eu',
+    'no seu tempo',
+    'ready when you are'
+  ].join('|'),
+  'gi'
+)
+
+// Action starters, including the English questions that offer one concrete step and the verbs the
+// agent writes without a modal. A second bare verb after and/ou is a second action, not decoration.
+const ACTION =
+  /(?:i(?:['’]ll| will| can| could| would)|let me|tell me to|shall i|do you want me to|would you like me to|want me to|vou|posso|faço|faria|deixo|leio|abro|escrevo|rode|trago|monto|preparo|instalo|configuro|checo|fecho|reviso|rodo|instalar)/gi
+const BARE_ACTION = /\b(?:and|ou)\s+(?:i\s+)?(?:fix|install|restore|open|close|resend|restart|post|take|do|stop|trigger|send|read|write|run|check|review|port|flip|delete|create|update|merge|push|commit|assino|espero)\b/gi
+const NO_ACTION = /\b(?:i(?:['’]ll| will| can| could| would)\s+(?:not|never)|(?:won['’]t|can['’]t|couldn['’]t|wouldn['’]t|shouldn['’]t))\b|\b(?:não|never)\s+(?:vou|posso|faço)\b/i
+const OPTIONS = /\?[\s\S]*\bor\b|\bor\b[\s\S]*\?/i
+const PT_OPTIONS = /\bou\b/i
+const GENERIC_OFFER = /\b(?:anything else|if you need anything)\b/i
+const IDIOM_CALL = /\bwas\s+(?:a\s+)?your call\b/i
+const SELF_SUFFICIENT = /\b(?:just say (?:yes|so|yes or no)|your call|ready when you are|at your word|say the word)\b/i
+const LIST = /(?:^|\n)\s*(?:[-*•]|\d+[.)])\s+/
+const MARKUP = /(?:^|\n)\s*(?:#{1,6}\s|\||>|\d+\.\s|[-*•]\s)|```/
+
+export function oneActionProposal(reply: string): { paragraph: string } | undefined {
+  const blocks = reply
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean)
+  const proposals = blocks.filter((block) => {
+    if (block.length > 400 || MARKUP.test(block) || LIST.test(block) || NO_ACTION.test(block)) return false
+    if (OPTIONS.test(block) || GENERIC_OFFER.test(block) || IDIOM_CALL.test(block)) return false
+    const flat = block.replace(/\s+/g, ' ')
+    const invitations = [...flat.matchAll(INVITATION)]
+    if (invitations.length !== 1) return false
+    if (PT_OPTIONS.test(flat.slice(invitations[0]!.index ?? 0))) return false
+    const actions = [...flat.matchAll(ACTION)]
+    const count = actions.length + [...flat.matchAll(BARE_ACTION)].length
+    if (count > 1 || (count === 0 && !SELF_SUFFICIENT.test(flat))) return false
+    // An action written before the invitation is a status with a wish, not a proposal to approve.
+    return !actions.length || (invitations[0]!.index ?? 0) <= (actions[0]!.index ?? 0)
+  })
+  return proposals.length === 1 ? { paragraph: proposals[0]! } : undefined
+}

@@ -15,6 +15,7 @@ export interface Decision {
   kind: DecisionKind
   options?: DecisionOption[]
   nextSteps?: true // a list of next steps, not a question: nothing starts ticked, and the card sends what the person ticks as a to-do
+  proceed?: true // one action the agent offered in words: the card has one approval button, not decisions
 }
 export interface Answer {
   chosen?: number[] // indexes into the options
@@ -74,6 +75,10 @@ export const isNextSteps = (question: Decision): boolean => question.nextSteps =
 // A next-steps card still open. Unlike a question it holds nothing: the reply is done, the next
 // message is a message of its own, and the card can be answered, or ignored, for as long as it's there.
 export const hasOpenSteps = (run: Run | undefined): boolean => run?.status === 'done' && run.stepsOpen === true
+
+// A one-action proposal from a finished reply. Its one question carries the proposal paragraph.
+export const isProceed = (question: Decision): boolean => question.proceed === true
+export const hasOpenProceed = (run: Run | undefined): boolean => run?.status === 'done' && run.proceedOpen === true
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
 const tooLong = (question: string): string =>

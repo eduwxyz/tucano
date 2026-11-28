@@ -113,9 +113,9 @@ import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
-import { AnswersSummary, AskCard, asShown, cardAnswers, NextStepsCard, ReplacedStepsCard } from './Decisions'
+import { AnswersSummary, AskCard, asShown, cardAnswers, NextStepsCard, ProceedCard, ReplacedStepsCard } from './Decisions'
 import { AskStrip } from './AskStrip'
-import { hasOpenSteps, questionsOf, type Answer, type Decision } from '../../../shared/questions'
+import { hasOpenSteps, isProceed, questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
@@ -702,7 +702,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
-          (hasOpenSteps(message.run) ? (
+          (questionsOf(message.run).some(isProceed) ? (
+            <ProceedCard message={message} />
+          ) : hasOpenSteps(message.run) ? (
             <NextStepsCard message={message} agentName={agent?.name} />
           ) : message.run?.stepsReplaced ? (
             <ReplacedStepsCard message={message} />

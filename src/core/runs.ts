@@ -38,7 +38,8 @@ import { loginsInOrder, nextLogin, noLoginLeft, primaryAccountOf, Spent, USUAL_L
 import { ALWAYS_LOAD, missingArgs, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
-import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenProceed, hasOpenSteps, isNextSteps, isProceed, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { oneActionProposal } from '../shared/proceed'
 import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
 import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
@@ -3590,7 +3591,13 @@ ${note}`,
       // no inbox item and no slot. An approval or a question in the same turn is what counts instead.
       const carded = !!proposed && !questions && !waiting
       const card = carded ? { questions: [proposed!], stepsOpen: true as const, ...(db.people().length > 1 ? { askedTo: requester.id } : {}) } : {}
-      const run: Run = { ...base, ...card, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+      // One action offered in the reply's own words is not a tool card: it stays a paragraph, with a
+      // single approval button. It waits on nobody, the same as a next-steps card.
+      const offered = !carded && !questions && !waiting ? oneActionProposal(text) : undefined
+      const proceed = offered
+        ? { questions: [{ question: offered.paragraph, kind: 'text' as const, proceed: true as const }], proceedOpen: true as const, ...(db.people().length > 1 ? { askedTo: requester.id } : {}) }
+        : {}
+      const run: Run = { ...base, ...card, ...proceed, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       // The new card and the closing of the one it replaces are written together: a restart finds one open, never two.
       const replaced = db.tx(() => {
         const closed = carded ? this.closeOpenSteps(agent.id, msg) : []
@@ -4132,7 +4139,7 @@ ${note}`,
     const asked = db.message(messageId)
     // An open next-steps card keeps no question: whoever it was proposed to answers it (or whoever may
     // answer for them), as long as they can see the conversation.
-    if (asked?.author.kind === 'agent' && hasOpenSteps(asked.run)) {
+    if (asked?.author.kind === 'agent' && (hasOpenSteps(asked.run) || hasOpenProceed(asked.run))) {
       const people = new People(db)
       const to = asked.run!.askedTo
       const mayAnswer = !people.conversationError(by, asked.conversationId) && (!to || people.canAnswer(by, { id: asked.id, conversationId: asked.conversationId, agentId: asked.author.id, text: '', askedTo: to, requestedBy: to, state: 'open', deadlineAt: Number.MAX_SAFE_INTEGER, createdAt: asked.at }))
@@ -4189,7 +4196,27 @@ ${note}`,
   async submitDecisions(messageId: string, by: Person): Promise<void> {
     if (this.lateOnReplaced(messageId)) return
     const asked = this.decidable(messageId, by)
+    if (hasOpenProceed(asked.run)) return this.approveProposal(asked, by)
     await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
+  }
+
+  // A yes on a one-action proposal wakes the same agent with the proposal as its task. The click is
+  // the trigger, not a message in the channel: the conversation keeps one prompt and one reply.
+  private approveProposal(asked: Message, by: Person): void {
+    const { db } = this.deps
+    const question = questionsOf(asked.run)[0]
+    const proposal = question && isProceed(question) ? question.question : undefined
+    if (!proposal || asked.author.kind !== 'agent') return
+    const { proceedOpen: _open, answers: _answer, ...run } = asked.run!
+    this.update(asked, { run: { ...run, status: 'done', answers: [{ text: L('Aprovado', 'Approved') }], answeredBy: by.id } })
+    const agent = db.agent(asked.author.id)
+    const conv = db.conversation(asked.conversationId)
+    if (!agent || agent.archived || !conv || this.paused) return
+    const task = L(
+      `A pessoa aprovou a proposta abaixo e pediu para você seguir. Faça só esta ação e traga o resultado.\n\n${proposal}`,
+      `The person approved the proposal below and asked you to go ahead. Carry out only this action and bring back the result.\n\n${proposal}`
+    )
+    void this.startReply(agent, conv, { depth: 1, threadId: asked.threadId, task }, { urgent: true })
   }
 
   // Dismissed with the card's Cancelar button: the question closes and the agent isn't woken. Its next turn reads that it

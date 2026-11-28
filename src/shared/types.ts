@@ -239,6 +239,7 @@ export interface Run {
   answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
   stepsOpen?: true // its next-steps card can still be answered; the reply itself is done and waits on no one
   stepsReplaced?: true // the same agent proposed a newer card in the same place: this one closed unanswered, and nobody dismissed it
+  proceedOpen?: true // a one-action proposal on this finished reply still waits for the person's yes
   cancelled?: true // the person dismissed the question on its card (Cancelar): no one answered it, and the agent wasn't woken
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
   answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
@@ -658,6 +659,8 @@ export interface Settings {
   // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
   // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
   showThinking?: boolean
+  // The one-click approval button under a reply offering a single action. Unset: off.
+  proceedButton?: boolean
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   primaryAccounts?: Partial<Record<AccountEngine, string>> // the primary login of a harness with accounts (its id, or unset: the usual login); the reply goes there first

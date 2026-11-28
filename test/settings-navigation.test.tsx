@@ -180,6 +180,12 @@ describe('settings search and groups', () => {
     expect(document.querySelector('.settings-results__none')?.textContent).toContain('No results for “zzz”')
   })
 
+  it('finds the Proceed toggle by its control name in both languages', () => {
+    expect(searchSettings(settingsStructure(access), 'one-click approval').map(hit => hit.section.id)).toEqual(['app-conversation'])
+    setLang('pt')
+    expect(searchSettings(settingsStructure(access), 'aprovar com um clique').map(hit => hit.section.id)).toEqual(['app-conversation'])
+  })
+
   it('searches only what this person sees, and shows only the groups they have something in', () => {
     const member = settingsStructure({ admin: false, owner: false, team: true, servers: true })
     expect(searchSettings(member, 'autonomy')).toEqual([])

@@ -3060,6 +3060,29 @@ h3 {
   border-color: var(--border);
   border-left-color: var(--border-strong);
 }
+/* One action offered in the reply itself: a single accent button, a touch above the 22px pills. */
+.proceed {
+  display: flex;
+  margin: 10px 0 4px;
+}
+.proceed__button {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.proceed__button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 86%, #000);
+}
+.proceed__button:disabled {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--text-3);
+  opacity: 1;
+}
 .ask__head {
   display: flex;
   align-items: center;
