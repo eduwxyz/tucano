@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { updateSettings, useStore } from '../store'
+import { getState, updateSettings, useStore } from '../store'
 import { Icon } from './ui'
 
 // Anything that folds keeps its id in one list in settings, so it stays folded after a restart. One that
@@ -8,7 +8,17 @@ export function useFold(id: string, startFolded = false): { open: boolean; toggl
   const folded = useStore((s) => s.settings.folded) ?? []
   const key = startFolded ? `+${id}` : id
   const marked = folded.includes(key)
-  return { open: startFolded ? marked : !marked, toggle: () => updateSettings({ folded: marked ? folded.filter((f) => f !== key) : [...folded, key] }) }
+  const open = startFolded ? marked : !marked
+  return { open, toggle: () => setFolded(key, !open) }
+}
+
+// Fold or unfold one id from outside a render (a double-click on a handle, a shortcut). It writes
+// nothing when the list already says so, so folding twice costs no round trip.
+export function setFolded(id: string, folded: boolean): void {
+  const now = getState().settings.folded ?? []
+  if (now.includes(id) === folded) return
+  updateSettings({ folded: folded ? [...now, id] : now.filter((f: string) => f !== id) })
+
 }
 
 export function FoldToggle({ open, onToggle, children }: { open: boolean; onToggle: () => void; children: ReactNode }): ReactNode {
